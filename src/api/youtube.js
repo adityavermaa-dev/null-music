@@ -5,10 +5,10 @@
 
 import axios from 'axios';
 
-const YT_API_BASE = '/api/yt';
+const YT_API_BASE = 'https://music-player-4mnv.onrender.com';
 
 export const youtubeApi = {
-    // Search for songs on YouTube Music
+
     searchSongs: async (query, limit = 10) => {
         try {
             const response = await axios.get(`${YT_API_BASE}/search`, {
