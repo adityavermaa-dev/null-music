@@ -74,7 +74,9 @@ app.use(
     createProxyMiddleware({
         target: "https://saavn.sumit.co",
         changeOrigin: true,
-        pathRewrite: { "^/api/saavn": "/api" },
+        pathRewrite: {
+            "^/api/saavn": ""
+        }
     })
 );
 
