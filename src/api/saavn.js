@@ -1,9 +1,8 @@
 import axios from 'axios';
-import { Capacitor } from '@capacitor/core';
 
-// Use direct URL for production/Android, proxy for local dev
-const SAAVN_API_BASE =
-    'https://devsyncapp.in/music/api/saavn';
+// In dev, Vite proxies /api/saavn → saavn.sumit.co
+// In production, server.mjs proxies /api/saavn → saavn.sumit.co
+const SAAVN_API_BASE = '/api/saavn';
 
 export const saavnApi = {
     // Search for songs
@@ -23,53 +22,14 @@ export const saavnApi = {
     // Get Top Charts / Trending
     getTrending: async () => {
         try {
-            const response = await axios.get(`${SAAVN_API_BASE}/modules`, { timeout: 10000 });
-            const data = response.data?.data;
-
-            // Try charts first
-            const charts = data?.charts || [];
-            if (charts.length > 0) {
-                const chartId = charts[0].id;
-                const chartDetails = await axios.get(`${SAAVN_API_BASE}/playlists`, {
-                    params: { id: chartId },
-                    timeout: 10000
-                });
-                const songs = chartDetails.data?.data?.songs || [];
-                if (songs.length > 0) return songs;
-            }
-
-            // Fallback: try trending playlists
-            const trending = data?.trending || {};
-            const trendingSongs = trending.songs || [];
-            if (trendingSongs.length > 0) return trendingSongs;
-
-            // Fallback: try albums
-            const albums = data?.albums || [];
-            if (albums.length > 0) {
-                const albumDetails = await axios.get(`${SAAVN_API_BASE}/albums`, {
-                    params: { id: albums[0].id },
-                    timeout: 10000
-                });
-                return albumDetails.data?.data?.songs || [];
-            }
-
-            // Last fallback: search for popular music
-            const fallback = await axios.get(`${SAAVN_API_BASE}/search/songs`, {
-                params: { query: 'trending hits', limit: 20 },
+            const response = await axios.get(`${SAAVN_API_BASE}/search/songs`, {
+                params: { query: 'trending hits 2025', limit: 20 },
                 timeout: 10000
             });
-            return fallback.data?.data?.results || [];
+            return response.data?.data?.results || [];
         } catch (error) {
             console.error("Saavn Trending Error:", error);
-            try {
-                const fallback = await axios.get(`${SAAVN_API_BASE}/search/songs`, {
-                    params: { query: 'top hits 2025', limit: 20 },
-                    timeout: 10000
-                });
-                return fallback.data?.data?.results || [];
-            } catch {
-                return [];
-            }
+            return [];
         }
     },
 

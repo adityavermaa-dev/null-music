@@ -5,7 +5,9 @@
 
 import axios from 'axios';
 
-const YT_API_BASE = 'https://devsyncapp.in/music/api/yt';
+// In dev, Vite proxies /api/yt → localhost:3001
+// In production, Nginx routes /music/api/yt → server.mjs
+const YT_API_BASE = '/api/yt';
 
 export const youtubeApi = {
 
@@ -23,27 +25,13 @@ export const youtubeApi = {
         }
     },
 
-    // Get stream details (audio URL) for a video ID
+    // Get stream URL — uses the server-side pipe endpoint
     getStreamDetails: async (videoId) => {
-        try {
-            const response = await axios.get(`${YT_API_BASE}/stream/${videoId}`, {
-                timeout: 15000
-            });
-            const data = response.data;
-            if (!data?.streamUrl) return null;
-
-            // Proxy the googlevideo.com URL through our server to avoid CORS
-            const proxiedUrl = `${YT_API_BASE}/proxy-stream?url=${encodeURIComponent(data.streamUrl)}`;
-
-            return {
-                ...data,
-                streamUrl: proxiedUrl,
-                originalStreamUrl: data.streamUrl
-            };
-        } catch (error) {
-            console.error('[YouTube] Stream error:', error.message);
-            return null;
-        }
+        // The server pipes audio directly, so we just return the URL
+        return {
+            videoId,
+            streamUrl: `${YT_API_BASE}/pipe/${videoId}`,
+        };
     },
 
     // Search suggestions
@@ -68,7 +56,7 @@ export const youtubeApi = {
         artist: ytSong.artist || ytSong.artists?.map(a => a.name).join(', ') || 'YouTube Artist',
         album: ytSong.album || 'YouTube Music',
         coverArt: ytSong.thumbnail || ytSong.thumbnails?.[0]?.url || '',
-        streamUrl: null,  // Fetched on-demand when played
+        streamUrl: `${YT_API_BASE}/pipe/${ytSong.id}`,
         duration: ytSong.duration || 0,
         source: 'youtube'
     })

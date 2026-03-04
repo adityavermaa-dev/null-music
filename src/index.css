@@ -1261,7 +1261,11 @@ body {
     }
 
     .content-scroll {
-        padding: 0 20px 20px;
+        padding: 0 20px 140px;
+    }
+
+    .search-wrapper {
+        width: 100%;
     }
 
     .hero-content h2 {
@@ -1379,20 +1383,24 @@ body {
 
 .mobile-full-player {
     position: fixed;
-    top: 100vh;
+    top: 0;
     left: 0;
     right: 0;
     bottom: 0;
+    height: 100vh;
+    height: 100dvh;
     z-index: 2000;
     background: var(--surface-100);
     transition: transform 0.35s cubic-bezier(0.2, 0.8, 0.2, 1);
+    transform: translateY(100%);
     display: flex;
     flex-direction: column;
     padding: 24px;
+    overflow-y: auto;
 }
 
 .mobile-full-player.expanded {
-    transform: translateY(-100vh);
+    transform: translateY(0);
 }
 
 .full-header {

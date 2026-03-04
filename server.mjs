@@ -1,13 +1,17 @@
 // ═══════════════════════════════════════════════════════
 // Aura Music Server
-// YouTube Music backend using youtubei.js
+// YouTube Music backend using youtubei.js + yt-dlp
 // ═══════════════════════════════════════════════════════
 
 import express from "express";
-import { Innertube, Platform } from "youtubei.js";
+import { Innertube } from "youtubei.js";
+import { execFile } from "child_process";
+import { promisify } from "util";
 import path from "path";
 import { fileURLToPath } from "url";
 import { createProxyMiddleware } from "http-proxy-middleware";
+
+const execFileAsync = promisify(execFile);
 
 const PORT = process.env.PORT || 3001;
 const app = express();
@@ -21,17 +25,8 @@ const streamCache = new Map();
 const CACHE_TTL = 1000 * 60 * 30;
 
 // ─────────────────────────────────────────────
-// youtube url decipher shim
+// Note: youtubei.js handles URL deciphering natively on Node.js
 // ─────────────────────────────────────────────
-
-Platform.shim.eval = async (data, env) => {
-    const properties = [];
-    if (env.n) properties.push(`n: exportedVars.nFunction("${env.n}")`);
-    if (env.sig) properties.push(`sig: exportedVars.sigFunction("${env.sig}")`);
-
-    const code = `${data.output}\nreturn { ${properties.join(", ")} }`;
-    return new Function(code)();
-};
 
 let yt = null;
 
@@ -267,41 +262,84 @@ app.get("/api/yt/lyrics", async (req, res) => {
 });
 
 // ─────────────────────────────────────────────
-// proxy stream
+// yt-dlp — get stream URL (cached)
 // ─────────────────────────────────────────────
 
-app.get("/api/yt/proxy-stream", async (req, res) => {
-    const { url } = req.query;
+async function getStreamUrl(videoId) {
+    const cached = streamCache.get(videoId);
+    if (cached && cached.expiry > Date.now()) return cached.url;
 
-    if (!url) return res.status(400).send("URL required");
+    const { stdout } = await execFileAsync("yt-dlp", [
+        "-f", "bestaudio",
+        "--get-url",
+        `https://music.youtube.com/watch?v=${videoId}`,
+    ], { timeout: 15000 });
+
+    const url = stdout.trim();
+    if (!url) throw new Error("yt-dlp returned no URL");
+
+    streamCache.set(videoId, { url, expiry: Date.now() + CACHE_TTL });
+    return url;
+}
+
+// ─────────────────────────────────────────────
+// pipe stream — server-side piped audio via yt-dlp
+// ─────────────────────────────────────────────
+
+app.get("/api/yt/pipe/:videoId", async (req, res) => {
+    const { videoId } = req.params;
+    if (!videoId) return res.status(400).send("videoId required");
 
     try {
-        const response = await fetch(url, {
-            headers: {
-                Range: req.headers.range || "bytes=0-",
-                "User-Agent": "Mozilla/5.0",
-            },
+        const streamUrl = await getStreamUrl(videoId);
+
+        // Forward range header from client for seeking
+        const headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        };
+        if (req.headers.range) {
+            headers.Range = req.headers.range;
+        }
+
+        const upstream = await fetch(streamUrl, { headers });
+
+        res.status(upstream.status);
+
+        // Forward essential headers
+        const fwd = ["content-type", "content-length", "content-range", "accept-ranges"];
+        fwd.forEach((h) => {
+            const v = upstream.headers.get(h);
+            if (v) res.setHeader(h, v);
         });
 
-        res.status(response.status);
+        if (!upstream.headers.get("accept-ranges")) {
+            res.setHeader("Accept-Ranges", "bytes");
+        }
 
-        response.headers.forEach((value, key) => {
-            res.setHeader(key, value);
+        // Pipe the body
+        const reader = upstream.body.getReader();
+        const pump = async () => {
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) { res.end(); return; }
+                if (!res.write(value)) {
+                    await new Promise((r) => res.once("drain", r));
+                }
+            }
+        };
+
+        pump().catch((err) => {
+            console.error("Pipe error:", err.message);
+            if (!res.headersSent) res.status(500).send("Stream error");
+            else res.end();
         });
 
-        response.body.pipeTo(
-            new WritableStream({
-                write(chunk) {
-                    res.write(chunk);
-                },
-                close() {
-                    res.end();
-                },
-            })
-        );
+        req.on("close", () => {
+            reader.cancel().catch(() => { });
+        });
     } catch (err) {
-        console.error("Proxy error:", err.message);
-        res.status(500).send("Proxy error");
+        console.error("Pipe error:", err.message);
+        if (!res.headersSent) res.status(500).json({ error: err.message });
     }
 });
 
