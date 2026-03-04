@@ -75,7 +75,7 @@ app.use(
         target: "https://saavn.sumit.co",
         changeOrigin: true,
         pathRewrite: {
-            "^/api/saavn": ""
+            "^/api/saavn": "/api"
         }
     })
 );
@@ -141,16 +141,7 @@ app.get("/api/yt/stream/:videoId", async (req, res) => {
         const innertube = await getYT();
         const info = await innertube.music.getInfo(videoId);
 
-        const formats = info.streaming_data?.adaptive_formats || [];
-
-        const audioFormats = formats.filter((f) =>
-            f.mime_type?.startsWith("audio/")
-        );
-
-        const best =
-            audioFormats.find((f) => f.mime_type?.includes("mp4a")) ||
-            audioFormats.find((f) => f.mime_type?.includes("opus")) ||
-            audioFormats[0];
+        const best = info.chooseFormat({ type: 'audio', quality: 'best' });
 
         if (!best) {
             return res.json({

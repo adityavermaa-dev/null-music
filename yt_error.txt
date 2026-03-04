@@ -1,0 +1,8 @@
+Fetching info...
+Formats available: 16
+FULL ERROR: Error: To decipher URLs, you must provide your own JavaScript evaluator. See https://ytjs.dev/guide/getting-started.html#providing-a-custom-javascript-interpreter for more details.
+    at Object.evaluate [as eval] (file:///D:/New%20folder/music-player/node_modules/youtubei.js/dist/src/platform/jsruntime/default.js:2:11)
+    at Player.decipher (file:///D:/New%20folder/music-player/node_modules/youtubei.js/dist/src/core/Player.js:109:52)
+    at Format.decipher (file:///D:/New%20folder/music-player/node_modules/youtubei.js/dist/src/parser/classes/misc/Format.js:175:23)
+    at test (file:///D:/New%20folder/music-player/test_yt2.mjs:15:32)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
