@@ -1,183 +1,196 @@
 import React, { useState, useEffect } from 'react';
 import { usePlayer } from '../context/PlayerContext';
-import { ChevronDown, Play, Pause, SkipBack, SkipForward, Repeat, Shuffle, ListMusic, FileText } from 'lucide-react';
+import { ChevronDown, Play, Pause, SkipBack, SkipForward, Repeat, Shuffle, ListMusic, FileText, Infinity as InfinityIcon } from 'lucide-react';
+
+const FALLBACK_COVER = 'https://placehold.co/500x500/27272a/71717a?text=%E2%99%AA';
 
 export default function MobilePlayer({ onOpenLyrics, onOpenQueue }) {
-    const {
-        currentTrack, isPlaying, progress, duration, isLoading,
-        togglePlay, skipNext, skipPrev, seekTo,
-        shuffleMode, repeatMode, toggleShuffle, cycleRepeat, dominantColor
-    } = usePlayer();
+  const {
+    currentTrack,
+    isPlaying,
+    progress,
+    duration,
+    isLoading,
+    togglePlay,
+    skipNext,
+    skipPrev,
+    seekTo,
+    shuffleMode,
+    repeatMode,
+    toggleShuffle,
+    cycleRepeat,
+    dominantColor,
+    autoRadioEnabled,
+    toggleAutoRadio,
+  } = usePlayer();
 
-    const [isExpanded, setIsExpanded] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
 
-    // ── Screen Wake Lock ──
-    useEffect(() => {
-        let wakeLock = null;
-        const requestWakeLock = async () => {
-            try {
-                if ('wakeLock' in navigator && isExpanded) {
-                    wakeLock = await navigator.wakeLock.request('screen');
-                }
-            } catch (err) {
-                console.warn("Wake Lock error:", err.message);
-            }
-        };
-
-        requestWakeLock();
-
-        const handleVisibilityChange = () => {
-            if (wakeLock !== null && document.visibilityState === 'visible') {
-                requestWakeLock();
-            }
-        };
-        document.addEventListener('visibilitychange', handleVisibilityChange);
-
-        return () => {
-            document.removeEventListener('visibilitychange', handleVisibilityChange);
-            if (wakeLock !== null) {
-                wakeLock.release().then(() => { wakeLock = null; });
-            }
-        };
-    }, [isExpanded]);
-
-
-    useEffect(() => {
-        if (!("mediaSession" in navigator) || !currentTrack) return;
-
-        navigator.mediaSession.metadata = new MediaMetadata({
-            title: currentTrack.title,
-            artist: currentTrack.artist,
-            album: currentTrack.album || "Aura Music",
-            artwork: [
-                { src: currentTrack.coverArt, sizes: "96x96", type: "image/png" },
-                { src: currentTrack.coverArt, sizes: "192x192", type: "image/png" },
-                { src: currentTrack.coverArt, sizes: "512x512", type: "image/png" }
-            ]
-        });
-
-        navigator.mediaSession.setActionHandler("play", togglePlay);
-        navigator.mediaSession.setActionHandler("pause", togglePlay);
-        navigator.mediaSession.setActionHandler("nexttrack", skipNext);
-        navigator.mediaSession.setActionHandler("previoustrack", skipPrev);
-
-    }, [currentTrack, togglePlay, skipNext, skipPrev]);
-
-    useEffect(() => {
-        if ("mediaSession" in navigator) {
-            navigator.mediaSession.playbackState = isPlaying ? "playing" : "paused";
+  useEffect(() => {
+    let wakeLock = null;
+    const requestWakeLock = async () => {
+      try {
+        if ('wakeLock' in navigator && isExpanded) {
+          wakeLock = await navigator.wakeLock.request('screen');
         }
-    }, [isPlaying]);
-
-    if (!currentTrack) return null;
-
-
-    const formatTime = (time) => {
-        if (!time && time !== 0) return '0:00';
-        const m = Math.floor(time / 60);
-        const s = Math.floor(time % 60);
-        return `${m}:${s.toString().padStart(2, '0')}`;
+      } catch (err) {
+        console.warn('Wake Lock error:', err.message);
+      }
     };
 
-    const handleProgressScrub = (e) => {
-        const val = parseFloat(e.target.value);
-        seekTo(val);
+    requestWakeLock();
+
+    const handleVisibilityChange = () => {
+      if (wakeLock !== null && document.visibilityState === 'visible') {
+        requestWakeLock();
+      }
     };
 
-    // Calculate a vibrant variant of the dominant color for the full screen glow
-    const glowColor = dominantColor.replace('rgb', 'rgba').replace(')', ', 0.6)');
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
-    return (
-        <div className="mobile-player-wrapper">
-            {/* MINI PLAYER (Bottom bar when collapsed) */}
-            <div
-                className={`mobile-mini-player ${isExpanded ? 'hidden' : ''}`}
-                onClick={() => setIsExpanded(true)}
-            >
-                <div className="mini-progress-bar" style={{ width: `${(progress / duration) * 100}%` }} />
-                <div className="mini-content">
-                    <img src={currentTrack.coverArt} alt="cover" className="mini-cover" />
-                    <div className="mini-info">
-                        <div className="mini-title">{currentTrack.title}</div>
-                        <div className="mini-artist">{currentTrack.artist}</div>
-                    </div>
-                    <div className="mini-controls" onClick={e => e.stopPropagation()}>
-                        <button className="icon-btn" onClick={togglePlay} disabled={isLoading}>
-                            {isLoading ? <div className="spinner" /> : isPlaying ? <Pause fill="currentColor" size={24} /> : <Play fill="currentColor" size={24} />}
-                        </button>
-                    </div>
-                </div>
-            </div>
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (wakeLock !== null) {
+        wakeLock.release().then(() => {
+          wakeLock = null;
+        });
+      }
+    };
+  }, [isExpanded]);
 
-            {/* FULL SCREEN PLAYER (When expanded) */}
-            <div
-                className={`mobile-full-player ${isExpanded ? 'expanded' : ''}`}
-                style={{
-                    background: `linear-gradient(to bottom, ${glowColor} 0%, var(--surface-100) 80%)`
-                }}
-            >
-                <div className="full-header">
-                    <button className="icon-btn" onClick={() => setIsExpanded(false)}>
-                        <ChevronDown size={28} />
-                    </button>
-                    <span className="now-playing-text">Now Playing</span>
-                    <div style={{ width: 28 }} />
-                </div>
+  if (!currentTrack) return null;
 
-                <div className="full-art-container">
-                    <img src={currentTrack.coverArt} alt="cover" className="full-cover" />
-                </div>
+  const safeDuration = Number.isFinite(duration) && duration > 0 ? duration : 0;
+  const progressPercent = safeDuration > 0 ? Math.max(0, Math.min(100, (progress / safeDuration) * 100)) : 0;
 
-                <div className="full-info">
-                    <h2 className="full-title">{currentTrack.title}</h2>
-                    <p className="full-artist">{currentTrack.artist}</p>
-                </div>
+  const coverArt = currentTrack.coverArt || FALLBACK_COVER;
 
-                <div className="full-progress">
-                    <input
-                        type="range"
-                        min={0}
-                        max={duration || 100}
-                        value={progress}
-                        onChange={handleProgressScrub}
-                        className="mobile-progress-slider"
-                        style={{
-                            background: `linear-gradient(to right, var(--text-100) ${(progress / duration) * 100}%, rgba(255,255,255,0.2) ${(progress / duration) * 100}%)`
-                        }}
-                    />
-                    <div className="time-labels">
-                        <span>{formatTime(progress)}</span>
-                        <span>{formatTime(duration)}</span>
-                    </div>
-                </div>
+  const formatTime = (time) => {
+    if (!time && time !== 0) return '0:00';
+    const m = Math.floor(time / 60);
+    const s = Math.floor(time % 60);
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  };
 
-                <div className="full-controls-main">
-                    <button className={`icon-btn ${shuffleMode ? 'control-active' : ''}`} onClick={toggleShuffle}>
-                        <Shuffle size={24} />
-                    </button>
-                    <button className="icon-btn" onClick={skipPrev}>
-                        <SkipBack fill="currentColor" size={32} />
-                    </button>
-                    <button className="play-pause-btn-large" onClick={togglePlay} disabled={isLoading}>
-                        {isLoading ? <div className="spinner" /> : isPlaying ? <Pause fill="currentColor" size={36} /> : <Play fill="currentColor" size={36} style={{ marginLeft: 4 }} />}
-                    </button>
-                    <button className="icon-btn" onClick={skipNext}>
-                        <SkipForward fill="currentColor" size={32} />
-                    </button>
-                    <button className={`icon-btn ${repeatMode !== 'off' ? 'control-active' : ''}`} onClick={cycleRepeat}>
-                        <Repeat size={24} />
-                    </button>
-                </div>
+  const handleProgressScrub = (e) => {
+    const val = parseFloat(e.target.value);
+    seekTo(val);
+  };
 
-                <div className="full-controls-bottom">
-                    <button className="icon-btn" onClick={() => { setIsExpanded(false); onOpenLyrics(); }}>
-                        <FileText size={24} />
-                    </button>
-                    <button className="icon-btn" onClick={() => { setIsExpanded(false); onOpenQueue(); }}>
-                        <ListMusic size={24} />
-                    </button>
-                </div>
-            </div>
+  const handleImageError = (event) => {
+    event.currentTarget.src = FALLBACK_COVER;
+  };
+
+  const glowColor = dominantColor.replace('rgb', 'rgba').replace(')', ', 0.6)');
+
+  return (
+    <div className="mobile-player-wrapper" aria-live="polite">
+      <div
+        className={`mobile-mini-player ${isExpanded ? 'hidden' : ''}`}
+        onClick={() => setIsExpanded(true)}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            setIsExpanded(true);
+          }
+        }}
+        aria-label="Open player"
+      >
+        <div className="mini-progress-bar" style={{ width: `${progressPercent}%` }} />
+        <div className="mini-content">
+          <img src={coverArt} alt="" className="mini-cover" onError={handleImageError} />
+          <div className="mini-info">
+            <div className="mini-title">{currentTrack.title}</div>
+            <div className="mini-artist">{currentTrack.artist}</div>
+          </div>
+          <div className="mini-controls" onClick={(e) => e.stopPropagation()}>
+            <button className="icon-btn" onClick={togglePlay} disabled={isLoading} aria-label={isPlaying ? 'Pause' : 'Play'} type="button">
+              {isLoading ? <div className="spinner" /> : isPlaying ? <Pause fill="currentColor" size={24} /> : <Play fill="currentColor" size={24} />}
+            </button>
+          </div>
         </div>
-    );
+      </div>
+
+      <div
+        className={`mobile-full-player ${isExpanded ? 'expanded' : ''}`}
+        style={{
+          background: `linear-gradient(to bottom, ${glowColor} 0%, var(--surface-100) 80%)`,
+        }}
+      >
+        <div className="full-header">
+          <button className="icon-btn" onClick={() => setIsExpanded(false)} aria-label="Collapse player" type="button">
+            <ChevronDown size={28} />
+          </button>
+          <span className="now-playing-text">Now Playing</span>
+          <div style={{ width: 28 }} />
+        </div>
+
+        <div className="full-art-container">
+          <img src={coverArt} alt="" className="full-cover" onError={handleImageError} />
+        </div>
+
+        <div className="full-info">
+          <h2 className="full-title">{currentTrack.title}</h2>
+          <p className="full-artist">{currentTrack.artist}</p>
+        </div>
+
+        <div className="full-progress">
+          <input
+            type="range"
+            min={0}
+            max={safeDuration || 100}
+            value={Math.max(0, Math.min(progress, safeDuration || 100))}
+            onChange={handleProgressScrub}
+            className="mobile-progress-slider"
+            style={{
+              background: `linear-gradient(to right, var(--text-100) ${progressPercent}%, rgba(255,255,255,0.2) ${progressPercent}%)`,
+            }}
+            aria-label="Track progress"
+          />
+          <div className="time-labels">
+            <span>{formatTime(progress)}</span>
+            <span>{formatTime(safeDuration)}</span>
+          </div>
+        </div>
+
+        <div className="full-controls-main">
+          <button className={`icon-btn ${shuffleMode ? 'control-active' : ''}`} onClick={toggleShuffle} aria-label="Toggle shuffle" type="button">
+            <Shuffle size={24} />
+          </button>
+          <button className="icon-btn" onClick={skipPrev} aria-label="Previous track" type="button">
+            <SkipBack fill="currentColor" size={32} />
+          </button>
+          <button className="play-pause-btn-large" onClick={togglePlay} disabled={isLoading} aria-label={isPlaying ? 'Pause' : 'Play'} type="button">
+            {isLoading ? <div className="spinner" /> : isPlaying ? <Pause fill="currentColor" size={36} /> : <Play fill="currentColor" size={36} style={{ marginLeft: 4 }} />}
+          </button>
+          <button className="icon-btn" onClick={skipNext} aria-label="Next track" type="button">
+            <SkipForward fill="currentColor" size={32} />
+          </button>
+          <button className={`icon-btn ${repeatMode !== 'off' ? 'control-active' : ''}`} onClick={cycleRepeat} aria-label={`Repeat mode ${repeatMode}`} type="button">
+            <Repeat size={24} />
+          </button>
+        </div>
+
+        <div className="full-controls-bottom">
+          <button
+            className={`icon-btn ${autoRadioEnabled ? 'control-active' : ''}`}
+            onClick={toggleAutoRadio}
+            aria-label="Autoplay similar songs"
+            type="button"
+          >
+            <InfinityIcon size={22} />
+          </button>
+          <button className="icon-btn" onClick={() => { setIsExpanded(false); onOpenLyrics(); }} aria-label="Open lyrics" type="button">
+            <FileText size={24} />
+          </button>
+          <button className="icon-btn" onClick={() => { setIsExpanded(false); onOpenQueue(); }} aria-label="Open queue" type="button">
+            <ListMusic size={24} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
+
