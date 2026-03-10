@@ -261,7 +261,7 @@ app.get("/api/yt/lyrics", async (req, res) => {
 // ─────────────────────────────────────────────
 
 function ytDlpBaseArgs(videoId) {
-    const args = ["-f", "bestaudio", "--no-warnings", "--js-runtimes", "nodejs"];
+    const args = ["-f", "bestaudio", "--no-warnings", "--js-runtimes", "node"];
     if (YT_EXTRACTOR_ARGS) args.push("--extractor-args", YT_EXTRACTOR_ARGS);
     if (YT_COOKIES_FILE) args.push("--cookies", YT_COOKIES_FILE);
     if (YT_SOURCE_ADDRESS) args.push("--source-address", YT_SOURCE_ADDRESS);
