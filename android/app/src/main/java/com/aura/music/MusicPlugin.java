@@ -33,6 +33,9 @@ public class MusicPlugin extends Plugin {
                 } else if (action.equals("com.aura.music.SKIP_PREV")) {
                     android.util.Log.d("MusicPlugin", "Notifying prevTrack");
                     notifyListeners("prevTrack", ret);
+                } else if (action.equals(MusicService.ACTION_PLAYBACK_ERROR)) {
+                    ret.put("message", intent.getStringExtra("message"));
+                    notifyListeners("playbackError", ret);
                 } else if (action.equals("com.aura.music.STATUS_UPDATE")) {
                     ret.put("position", intent.getDoubleExtra("position", 0));
                     ret.put("duration", intent.getDoubleExtra("duration", 0));
@@ -45,6 +48,7 @@ public class MusicPlugin extends Plugin {
         filter.addAction("com.aura.music.SKIP_NEXT");
         filter.addAction("com.aura.music.SKIP_PREV");
         filter.addAction("com.aura.music.TRACK_ENDED");
+        filter.addAction(MusicService.ACTION_PLAYBACK_ERROR);
         filter.addAction("com.aura.music.STATUS_UPDATE");
         
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {

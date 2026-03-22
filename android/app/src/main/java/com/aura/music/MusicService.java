@@ -19,6 +19,7 @@ import androidx.media.app.NotificationCompat.MediaStyle;
 
 import com.google.android.exoplayer2.ExoPlayer;
 import com.google.android.exoplayer2.MediaItem;
+import com.google.android.exoplayer2.PlaybackException;
 import com.google.android.exoplayer2.Player;
 
 public class MusicService extends Service {
@@ -29,6 +30,8 @@ public class MusicService extends Service {
     public static final String ACTION_NEXT = "com.aura.music.ACTION_NEXT";
     public static final String ACTION_PREV = "com.aura.music.ACTION_PREV";
     public static final String ACTION_SEEK = "com.aura.music.ACTION_SEEK";
+
+    public static final String ACTION_PLAYBACK_ERROR = "com.aura.music.PLAYBACK_ERROR";
     
     private static final String CHANNEL_ID = "MusicPlaybackChannel";
     private static final int NOTIFICATION_ID = 1;
@@ -81,6 +84,16 @@ public class MusicService extends Service {
                 if (state == Player.STATE_ENDED) {
                     sendExplicitBroadcast("com.aura.music.TRACK_ENDED");
                 }
+            }
+
+            @Override
+            public void onPlayerError(PlaybackException error) {
+                android.util.Log.e("MusicService", "Playback error", error);
+                Intent intent = new Intent(ACTION_PLAYBACK_ERROR);
+                intent.putExtra("message", error != null ? error.getMessage() : "Playback failed");
+                sendExplicitBroadcast(intent);
+                updateNotification();
+                updatePlaybackState();
             }
         });
 

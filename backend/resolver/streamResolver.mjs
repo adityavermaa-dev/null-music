@@ -64,8 +64,8 @@ export async function resolveStreamUrl({
       }
 
       try {
-        // Try android_vr first
-        const url1 = await ytdlpQueue.add(() => ytdlpGetUrl(ytdlpBin, videoId, { playerClient: 'android_vr' }));
+        // Try multiple cookie-free player clients first (most reliable without cookies)
+        const url1 = await ytdlpQueue.add(() => ytdlpGetUrl(ytdlpBin, videoId, { playerClient: 'android_vr,ios,android' }));
         if (url1) {
           const ok1 = await withTimeout(isStreamAlive(url1), VALIDATION_TIMEOUT_MS).catch(() => false);
           if (ok1) {
@@ -74,8 +74,8 @@ export async function resolveStreamUrl({
           }
         }
 
-        // Then default client with node JS runtime
-        const url2 = await ytdlpQueue.add(() => ytdlpGetUrl(ytdlpBin, videoId, { jsRuntimeNode: true }));
+        // Then retry with Node JS runtime (some environments need it), still cookie-free.
+        const url2 = await ytdlpQueue.add(() => ytdlpGetUrl(ytdlpBin, videoId, { jsRuntimeNode: true, playerClient: 'android_vr,ios,android' }));
         if (url2) {
           const ok2 = await withTimeout(isStreamAlive(url2), VALIDATION_TIMEOUT_MS).catch(() => false);
           if (ok2) {

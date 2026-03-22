@@ -10,6 +10,7 @@ import React, {
 } from "react";
 
 import { registerPlugin } from "@capacitor/core";
+import { Capacitor } from '@capacitor/core';
 
 import { youtubeApi } from "../api/youtube";
 import { saavnApi } from "../api/saavn";
@@ -136,11 +137,12 @@ export const PlayerProvider = ({ children }) => {
 
       let streamUrl = track.streamUrl;
 
-      if (track.source === "youtube" && !streamUrl) {
-
+      if (track.source === "youtube") {
         const videoId = track.videoId || track.id.replace(/^yt-/, "");
 
-        const details = await youtubeApi.getStreamDetails(videoId);
+        const details = await youtubeApi.getStreamDetails(videoId, {
+          preferDirect: Capacitor.isNativePlatform(),
+        });
 
         if (seq !== playSeqRef.current) return;
 
@@ -678,7 +680,7 @@ export const PlayerProvider = ({ children }) => {
   /* -------------------------- LOCK SCREEN CONTROLS & AUTOPLAY -------------------------- */
 
   useEffect(() => {
-    let nextListener, prevListener, statusListener;
+    let nextListener, prevListener, statusListener, errorListener;
 
     (async () => {
       try {
@@ -704,6 +706,13 @@ export const PlayerProvider = ({ children }) => {
           if (data.position != null) setProgress(data.position);
           if (data.duration != null) setDuration(data.duration);
         });
+
+        errorListener = await MusicPlayer.addListener('playbackError', (data) => {
+          const msg = data?.message ? String(data.message) : 'Song not available';
+          setIsPlaying(false);
+          setIsLoading(false);
+          setPlaybackError(msg || 'Song not available');
+        });
       } catch {
         // MusicPlayer plugin not available on web — ignore
       }
@@ -713,6 +722,7 @@ export const PlayerProvider = ({ children }) => {
       nextListener?.remove?.();
       prevListener?.remove?.();
       statusListener?.remove?.();
+      errorListener?.remove?.();
     };
   }, []);
 

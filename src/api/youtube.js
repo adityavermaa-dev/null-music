@@ -45,10 +45,43 @@ export const youtubeApi = {
     return result.data;
   },
 
-  getStreamDetails: async (videoId) => ({
-    videoId,
-    streamUrl: `${YT_API_BASE}/pipe/${videoId}`,
-  }),
+  getStreamDetailsSafe: async (videoId) => {
+    const result = await requestYoutube(
+      'youtube.getStreamDetails',
+      `/stream/${videoId}`,
+      { timeout: 15000 },
+      'Stream is unavailable right now.'
+    );
+
+    if (!result.ok) {
+      return { ok: false, data: null, error: result.error };
+    }
+
+    return {
+      ok: true,
+      data: result.response?.data || null,
+      error: null,
+    };
+  },
+
+  // preferDirect=true is best for native (ExoPlayer) because it avoids proxy/streaming edge-cases.
+  // We still fall back to /pipe for web playback or when /stream fails.
+  getStreamDetails: async (videoId, { preferDirect = false } = {}) => {
+    const pipeUrl = `${YT_API_BASE}/pipe/${videoId}`;
+
+    if (!preferDirect) {
+      return { videoId, streamUrl: pipeUrl, pipeUrl, directUrl: null };
+    }
+
+    const result = await youtubeApi.getStreamDetailsSafe(videoId);
+    const directUrl = result.ok ? result.data?.streamUrl : null;
+    return {
+      videoId,
+      streamUrl: directUrl || pipeUrl,
+      pipeUrl,
+      directUrl: directUrl || null,
+    };
+  },
 
   getSearchSuggestionsSafe: async (query) => {
     const result = await requestYoutube(
@@ -101,7 +134,8 @@ export const youtubeApi = {
     artist: ytSong.artist || ytSong.artists?.map((a) => a.name).join(', ') || 'YouTube Artist',
     album: ytSong.album || 'YouTube Music',
     coverArt: ytSong.thumbnail || ytSong.thumbnails?.[0]?.url || '',
-    streamUrl: `${YT_API_BASE}/pipe/${ytSong.id}`,
+    // Do not assume pipe works for native playback; PlayerContext resolves the best URL at play-time.
+    streamUrl: null,
     duration: ytSong.duration || 0,
     source: 'youtube',
   }),
