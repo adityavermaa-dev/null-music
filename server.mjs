@@ -403,7 +403,17 @@ app.get("/api/yt/pipe/:videoId", async (req, res) => {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         };
         if (req.headers.range) headers.Range = req.headers.range;
-        const upstream = await fetch(freshUrl, { headers });
+
+        const upstreamTimeoutMs = Math.max(1000, Number(process.env.UPSTREAM_FETCH_TIMEOUT_MS || 12000));
+        const controller = new AbortController();
+        const timer = setTimeout(() => {
+            try { controller.abort(); } catch { }
+        }, upstreamTimeoutMs);
+
+        const upstream = await fetch(freshUrl, { headers, signal: controller.signal }).finally(() => {
+            clearTimeout(timer);
+        });
+
         if (upstream.ok || upstream.status === 206) {
             return pipeUpstream(upstream, res);
         }
