@@ -116,6 +116,14 @@ function App() {
     setTrendingError(null);
 
     try {
+      // Prefer backend "global plays" trending (fast + cached). If empty, fall back to Saavn.
+      const userId = getOrCreateUserId();
+      const recoRes = await recommendationsApi.getRecommendationsSafe(userId);
+      if (recoRes.ok && recoRes.data?.trending?.length) {
+        setTopTracks(recoRes.data.trending);
+        return;
+      }
+
       const result = await saavnApi.getTrendingSafe();
       if (!result.ok) {
         setTopTracks([]);
