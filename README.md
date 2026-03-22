@@ -1,9 +1,21 @@
-# Aura Music / Null
+# Null
 
 This repo contains:
 
-- A Node.js backend (`server.mjs`) that provides YouTube Music search + streaming endpoints.
+- A Node.js backend (`server.mjs`) that provides music search + streaming endpoints.
 - A Flutter (Android/Kotlin) app template under `flutter-template/`.
+
+## License
+
+MIT — see LICENSE.
+
+## Contributing
+
+See CONTRIBUTING.md.
+
+## Security
+
+See SECURITY.md.
 
 ## Backend
 
