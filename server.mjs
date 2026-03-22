@@ -5,13 +5,17 @@
 
 import express from "express";
 import { Innertube } from "youtubei.js";
-import { execFile, spawn } from "child_process";
-import { promisify } from "util";
 import path from "path";
 import { fileURLToPath } from "url";
 import { createProxyMiddleware } from "http-proxy-middleware";
+import rateLimit from "express-rate-limit";
 
-const execFileAsync = promisify(execFile);
+import { createCache } from "./backend/cache/cache.mjs";
+import { resolveStreamUrl } from "./backend/resolver/streamResolver.mjs";
+import { ytdlpQueue } from "./backend/queue/ytdlpQueue.mjs";
+import { buildYtdlpArgs } from "./backend/providers/ytdlpProvider.mjs";
+import { spawnWithTimeout } from "./backend/lib/spawnWithTimeout.mjs";
+import { logger } from "./backend/lib/logger.mjs";
 
 const PORT = process.env.PORT || 3001;
 const app = express();
@@ -22,16 +26,14 @@ const YT_EXTRACTOR_ARGS = process.env.YT_EXTRACTOR_ARGS || "";
 
 // Cookies are intentionally disabled (yt-dlp runs without cookies).
 if (process.env.YT_COOKIES_FILE) {
-    console.warn("[config] Ignoring YT_COOKIES_FILE: cookies are disabled in this backend");
+    logger.warn("config", "Ignoring YT_COOKIES_FILE: cookies are disabled in this backend");
 }
 
 // resolve dirname
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// cache for stream urls
-const streamCache = new Map();
-const CACHE_TTL = 1000 * 60 * 30;
+const cachePromise = createCache();
 
 // ─────────────────────────────────────────────
 // Note: youtubei.js handles URL deciphering natively on Node.js
@@ -41,7 +43,7 @@ let yt = null;
 
 async function getYT() {
     if (!yt) {
-        console.log("Creating Innertube session...");
+        logger.info("yt", "Creating Innertube session...");
 
         yt = await Innertube.create({
             lang: "en",
@@ -50,7 +52,7 @@ async function getYT() {
             generate_session_locally: true,
         });
 
-        console.log("YouTube session ready");
+        logger.info("yt", "YouTube session ready");
     }
 
     return yt;
@@ -66,6 +68,33 @@ app.use((req, res, next) => {
         "Access-Control-Allow-Headers",
         "Origin, X-Requested-With, Content-Type, Accept"
     );
+    next();
+});
+
+// ─────────────────────────────────────────────
+// rate limiting (basic protection)
+// ─────────────────────────────────────────────
+
+const windowMs = Math.max(1, Number(process.env.RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000));
+const maxReq = Math.max(1, Number(process.env.RATE_LIMIT_MAX || 200));
+
+app.use(
+    "/api/",
+    rateLimit({
+        windowMs,
+        max: maxReq,
+        standardHeaders: true,
+        legacyHeaders: false,
+    })
+);
+
+// request logging (cheap)
+app.use((req, res, next) => {
+    const start = Date.now();
+    res.on("finish", () => {
+        const ms = Date.now() - start;
+        logger.info("http", `${req.method} ${req.originalUrl} ${res.statusCode} ${ms}ms`);
+    });
     next();
 });
 
@@ -135,19 +164,20 @@ app.get("/api/yt/stream/:videoId", async (req, res) => {
 
     if (!videoId) return res.status(400).json({ error: "videoId required" });
 
-    const cached = streamCache.get(videoId);
-
-    if (cached && cached.expiry > Date.now()) {
-        return res.json({ videoId, streamUrl: cached.url });
-    }
-
     try {
-        const streamUrl = await getStreamUrl(videoId);
+        const innertube = await getYT();
+        const cache = await cachePromise;
+
+        const streamUrl = await resolveStreamUrl({
+            innertube,
+            ytdlpBin: YT_DLP_BIN,
+            cache,
+            videoId,
+        });
 
         // Fetch metadata from youtubei.js (still works for info, just not stream URLs)
         let title, author, duration, thumbnail;
         try {
-            const innertube = await getYT();
             const info = await innertube.music.getInfo(videoId);
             title = info.basic_info?.title;
             author = info.basic_info?.author;
@@ -166,8 +196,8 @@ app.get("/api/yt/stream/:videoId", async (req, res) => {
 
         res.json(responseData);
     } catch (err) {
-        console.error("Stream error:", err.message);
-        res.status(500).json({ streamUrl: null });
+        logger.error("stream", "Stream error", { videoId, error: err?.message });
+        res.status(500).json({ streamUrl: null, error: "Stream unavailable" });
     }
 });
 
@@ -257,56 +287,7 @@ app.get("/api/yt/lyrics", async (req, res) => {
 });
 
 // ─────────────────────────────────────────────
-// stream URL extraction (youtubei.js primary, yt-dlp fallback)
-// ─────────────────────────────────────────────
-
-// ─────────────────────────────────────────────
-// yt-dlp argument builder
-// ─────────────────────────────────────────────
-
-function ytDlpBaseArgs(videoId, { playerClient } = {}) {
-    const args = ["-f", "bestaudio"];
-    // Use android_vr client by default — returns pre-signed URLs (no decipher needed)
-    const client = playerClient || "android_vr";
-    args.push("--extractor-args", `youtube:player_client=${client}`);
-    if (YT_EXTRACTOR_ARGS) args.push("--extractor-args", YT_EXTRACTOR_ARGS);
-    if (YT_SOURCE_ADDRESS) args.push("--source-address", YT_SOURCE_ADDRESS);
-    args.push(`https://music.youtube.com/watch?v=${videoId}`);
-    return args;
-}
-
-// ─────────────────────────────────────────────
-// get audio stream URL via yt-dlp
-// ─────────────────────────────────────────────
-
-async function getStreamUrl(videoId) {
-    const cached = streamCache.get(videoId);
-    if (cached && cached.expiry > Date.now()) return cached.url;
-
-    // Primary: android_vr client (pre-signed URLs, no decipher needed)
-    let url;
-    try {
-        const args = ytDlpBaseArgs(videoId);
-        args.splice(args.length - 1, 0, "--get-url");
-        const { stdout } = await execFileAsync(YT_DLP_BIN, args, { timeout: 30000 });
-        url = stdout.trim();
-        if (!url) throw new Error("yt-dlp (android_vr) returned no URL");
-        console.log(`[stream] yt-dlp android_vr OK for ${videoId}`);
-    } catch (err) {
-        // Fallback: default client with JS runtime
-        console.warn(`[stream] android_vr failed for ${videoId}: ${err.message}, trying default client…`);
-        const args2 = ["-f", "bestaudio", "--js-runtimes", "node", "--get-url"];
-        if (YT_SOURCE_ADDRESS) args2.push("--source-address", YT_SOURCE_ADDRESS);
-        args2.push(`https://music.youtube.com/watch?v=${videoId}`);
-        const { stdout } = await execFileAsync(YT_DLP_BIN, args2, { timeout: 30000 });
-        url = stdout.trim();
-        if (!url) throw new Error("yt-dlp (default) returned no URL");
-        console.log(`[stream] yt-dlp default OK for ${videoId}`);
-    }
-
-    streamCache.set(videoId, { url, expiry: Date.now() + CACHE_TTL });
-    return url;
-}
+// stream URL extraction is handled by backend/resolver/streamResolver.mjs
 
 // ─────────────────────────────────────────────
 // pipe stream — yt-dlp spawns and pipes audio directly
@@ -318,26 +299,16 @@ app.get("/api/yt/pipe/:videoId", async (req, res) => {
         return res.status(400).send("Invalid videoId");
     }
 
-    // Strategy 1: if we have a cached URL, proxy it (fast path)
-    const cached = streamCache.get(videoId);
-    if (cached && cached.expiry > Date.now()) {
-        try {
-            const headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            };
-            if (req.headers.range) headers.Range = req.headers.range;
-            const upstream = await fetch(cached.url, { headers });
-            if (upstream.ok || upstream.status === 206) {
-                return pipeUpstream(upstream, res);
-            }
-            // URL expired, remove from cache
-            streamCache.delete(videoId);
-        } catch { streamCache.delete(videoId); }
-    }
-
-    // Strategy 2: get a fresh URL via youtubei.js / yt-dlp and proxy it
+    // Strategy 1: resolve a URL via resolver/cache and proxy it (fast path)
     try {
-        const freshUrl = await getStreamUrl(videoId);
+        const innertube = await getYT();
+        const cache = await cachePromise;
+        const freshUrl = await resolveStreamUrl({
+            innertube,
+            ytdlpBin: YT_DLP_BIN,
+            cache,
+            videoId,
+        });
         const headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         };
@@ -347,46 +318,88 @@ app.get("/api/yt/pipe/:videoId", async (req, res) => {
             return pipeUpstream(upstream, res);
         }
     } catch (urlErr) {
-        console.warn(`[pipe] URL-based stream failed for ${videoId}: ${urlErr.message}, falling back to yt-dlp pipe…`);
+        logger.warn("pipe", "URL-based stream failed; falling back to yt-dlp pipe", { videoId, error: urlErr?.message });
     }
 
-    // Strategy 3: spawn yt-dlp and pipe audio directly to response (last resort)
-    const args = ytDlpBaseArgs(videoId);
-    args.splice(args.length - 1, 0, "-o", "-");
-
+    // Strategy 2: queued yt-dlp process piping (last resort; concurrency-limited)
     res.setHeader("Content-Type", "audio/webm");
     res.setHeader("Accept-Ranges", "none");
 
-    const proc = spawn(YT_DLP_BIN, args, { stdio: ["ignore", "pipe", "pipe"] });
-    let hasData = false;
-    let stderrBuf = "";
+    const startTimeoutMs = Math.max(1000, Number(process.env.YTDLP_PIPE_START_TIMEOUT_MS || 8000));
 
-    proc.stdout.on("data", (chunk) => {
-        hasData = true;
-        if (!res.writableEnded) res.write(chunk);
-    });
+    await ytdlpQueue.add(async () => {
+        const pipeAttempt = (opts) => new Promise((resolve) => {
+            const args = buildYtdlpArgs(videoId, {
+                extractorArgs: YT_EXTRACTOR_ARGS,
+                sourceAddress: YT_SOURCE_ADDRESS,
+                outputToStdout: true,
+                ...opts,
+            });
 
-    proc.stderr.on("data", (chunk) => {
-        stderrBuf += chunk.toString();
-    });
+            const { proc } = spawnWithTimeout(
+                YT_DLP_BIN,
+                args,
+                { timeoutMs: Number(process.env.YTDLP_PIPE_TIMEOUT_MS || 0) || 24 * 60 * 60 * 1000 }
+            );
 
-    proc.on("close", (code) => {
-        if (!hasData && !res.headersSent) {
-            console.error("yt-dlp pipe failed:", stderrBuf.slice(0, 500));
+            let hasData = false;
+            let stderrBuf = "";
+            const startTimer = setTimeout(() => {
+                if (!hasData) {
+                    try { proc.kill("SIGKILL"); } catch { }
+                }
+            }, startTimeoutMs);
+
+            proc.stdout.on("data", (chunk) => {
+                if (!hasData) {
+                    hasData = true;
+                    clearTimeout(startTimer);
+                }
+                if (!res.writableEnded) res.write(chunk);
+            });
+
+            proc.stderr.on("data", (chunk) => {
+                stderrBuf += chunk.toString();
+                if (stderrBuf.length > 10_000) stderrBuf = stderrBuf.slice(-10_000);
+            });
+
+            proc.on("close", () => {
+                clearTimeout(startTimer);
+                resolve({ ok: hasData, stderr: stderrBuf });
+            });
+
+            proc.on("error", (err) => {
+                clearTimeout(startTimer);
+                resolve({ ok: false, stderr: `${stderrBuf}\n${err?.message || ''}`.trim() });
+            });
+
+            req.on("close", () => {
+                try {
+                    proc.kill("SIGTERM");
+                } catch {
+                    // ignore
+                }
+            });
+        });
+
+        const first = await pipeAttempt({ playerClient: "android_vr" });
+        if (first.ok) {
+            if (!res.writableEnded) res.end();
+            return;
+        }
+
+        const second = await pipeAttempt({ jsRuntimeNode: true });
+        if (second.ok) {
+            if (!res.writableEnded) res.end();
+            return;
+        }
+
+        if (!res.headersSent) {
+            logger.error("pipe", "yt-dlp pipe failed", { videoId, stderr: (second.stderr || first.stderr || '').slice(0, 500) });
             res.status(502).json({ error: "Stream unavailable" });
         } else {
             res.end();
         }
-    });
-
-    proc.on("error", (err) => {
-        console.error("yt-dlp spawn error:", err.message);
-        if (!res.headersSent) res.status(500).json({ error: "Internal error" });
-        else res.end();
-    });
-
-    req.on("close", () => {
-        proc.kill("SIGTERM");
     });
 });
 
@@ -479,7 +492,10 @@ app.get("/api/yt/up-next/:videoId", async (req, res) => {
 app.get("/api/yt/health", (req, res) => {
     res.json({
         status: "ok",
-        cacheSize: streamCache.size,
+        cache: {
+            type: process.env.REDIS_URL ? "redis" : "memory",
+            namespace: process.env.CACHE_NAMESPACE || "aura",
+        },
         hasSession: !!yt,
     });
 });

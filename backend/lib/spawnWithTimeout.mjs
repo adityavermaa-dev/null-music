@@ -16,23 +16,26 @@ export function spawnWithTimeout(bin, args, options = {}) {
   });
 
   let timedOut = false;
-  const timer = setTimeout(() => {
-    timedOut = true;
-    try {
-      proc.kill('SIGKILL');
-    } catch {
-      // ignore
-    }
-  }, timeoutMs);
+  const useTimeout = Number.isFinite(timeoutMs) && timeoutMs > 0;
+  const timer = useTimeout
+    ? setTimeout(() => {
+        timedOut = true;
+        try {
+          proc.kill('SIGKILL');
+        } catch {
+          // ignore
+        }
+      }, timeoutMs)
+    : null;
 
   const done = new Promise((resolve, reject) => {
     proc.once('error', (err) => {
-      clearTimeout(timer);
+      if (timer) clearTimeout(timer);
       reject(err);
     });
 
     proc.once('close', (code) => {
-      clearTimeout(timer);
+      if (timer) clearTimeout(timer);
       if (timedOut) {
         reject(new Error(`Process timeout after ${timeoutMs}ms`));
       } else {

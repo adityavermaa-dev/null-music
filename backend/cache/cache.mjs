@@ -43,23 +43,32 @@ class RedisCache {
   }
 
   async get(key) {
-    await this._ensure();
-    const raw = await this._redis.get(key);
-    if (!raw) return null;
     try {
-      return JSON.parse(raw);
-    } catch {
-      return raw;
+      await this._ensure();
+      const raw = await this._redis.get(key);
+      if (!raw) return null;
+      try {
+        return JSON.parse(raw);
+      } catch {
+        return raw;
+      }
+    } catch (err) {
+      logger.warn('cache', 'Redis get failed (treating as miss)', { key, error: err?.message });
+      return null;
     }
   }
 
   async set(key, value, ttlSeconds) {
-    await this._ensure();
-    const raw = typeof value === 'string' ? value : JSON.stringify(value);
-    if (ttlSeconds) {
-      await this._redis.set(key, raw, 'EX', ttlSeconds);
-    } else {
-      await this._redis.set(key, raw);
+    try {
+      await this._ensure();
+      const raw = typeof value === 'string' ? value : JSON.stringify(value);
+      if (ttlSeconds) {
+        await this._redis.set(key, raw, 'EX', ttlSeconds);
+      } else {
+        await this._redis.set(key, raw);
+      }
+    } catch (err) {
+      logger.warn('cache', 'Redis set failed (skipping)', { key, error: err?.message });
     }
   }
 }

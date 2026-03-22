@@ -15,6 +15,7 @@ export default function MobilePlayer({ onOpenLyrics, onOpenQueue }) {
     progress,
     duration,
     isLoading,
+    playbackError,
     togglePlay,
     skipNext,
     skipPrev,
@@ -131,7 +132,6 @@ export default function MobilePlayer({ onOpenLyrics, onOpenQueue }) {
     event.currentTarget.src = FALLBACK_COVER;
   };
 
-  const glowColor = dominantColor.replace('rgb', 'rgba').replace(')', ', 0.35)');
   const glowColorStrong = dominantColor.replace('rgb', 'rgba').replace(')', ', 0.55)');
   const RepeatIcon = repeatMode === 'one' ? Repeat1 : Repeat;
 
@@ -159,6 +159,9 @@ export default function MobilePlayer({ onOpenLyrics, onOpenQueue }) {
           <div className="mini-info">
             <div className="mini-title">{currentTrack.title}</div>
             <div className="mini-artist">{currentTrack.artist}</div>
+            {playbackError ? (
+              <div className="mini-error error-text" role="status" aria-live="polite">{playbackError}</div>
+            ) : null}
           </div>
           <div className="mini-actions" onClick={(e) => e.stopPropagation()}>
             <button className="icon-btn" onClick={skipPrev} aria-label="Previous" type="button">
@@ -216,6 +219,9 @@ export default function MobilePlayer({ onOpenLyrics, onOpenQueue }) {
             <div className="fp-info-text">
               <h2 className="fp-title">{currentTrack.title}</h2>
               <p className="fp-artist">{currentTrack.artist}</p>
+              {playbackError ? (
+                <p className="fp-error error-text" role="status" aria-live="polite">{playbackError}</p>
+              ) : null}
             </div>
             <button
               className={`fp-like-btn ${autoRadioEnabled ? 'fp-like-active' : ''}`}

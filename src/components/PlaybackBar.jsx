@@ -26,6 +26,7 @@ export default function PlaybackBar({ onOpenLyrics, onOpenQueue }) {
     duration,
     volume,
     isLoading,
+    playbackError,
     shuffleMode,
     repeatMode,
     autoRadioEnabled,
@@ -82,6 +83,9 @@ export default function PlaybackBar({ onOpenLyrics, onOpenQueue }) {
             <div className="pb-track-info">
               <h4 className="pb-title">{currentTrack.title}</h4>
               <p className="pb-artist">{currentTrack.artist}</p>
+              {playbackError ? (
+                <p className="pb-error error-text" role="status" aria-live="polite">{playbackError}</p>
+              ) : null}
             </div>
           </>
         ) : (

@@ -842,6 +842,12 @@ body {
     overflow: hidden;
 }
 
+.pb-error {
+    font-size: 11px;
+    line-height: 1.2;
+    opacity: 0.95;
+}
+
 .pb-empty {
     color: var(--text-300);
     font-size: 13px;
@@ -1686,6 +1692,15 @@ body {
     text-overflow: ellipsis;
 }
 
+.mini-error {
+    font-size: 11px;
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-align: left;
+}
+
 .mini-actions {
     display: flex;
     align-items: center;
@@ -1883,6 +1898,13 @@ body {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+.fp-error {
+    font-size: 13px;
+    margin-top: 6px;
+    text-align: left;
+    white-space: normal;
 }
 
 .fp-like-btn {

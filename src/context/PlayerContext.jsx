@@ -17,7 +17,6 @@ import { saavnApi } from "../api/saavn";
 import {
   buildPlaybackSession,
   cycleSleepTimerValue,
-  getNextListIndex,
   getPreviousQueueIndex,
   parseStoredSession,
   serializeSession
@@ -69,6 +68,7 @@ export const PlayerProvider = ({ children }) => {
   const [repeatMode, setRepeatMode] = useState("off");
 
   const [isLoading, setIsLoading] = useState(false);
+  const [playbackError, setPlaybackError] = useState(null);
   const [dominantColor, setDominantColor] = useState("rgba(15,15,19,1)");
 
   const [autoRadioEnabled, setAutoRadioEnabled] = useState(true);
@@ -91,6 +91,7 @@ export const PlayerProvider = ({ children }) => {
   const loadAndPlayRef = useRef(null);
   const queueRef = useRef(queue);
   const queueIndexRef = useRef(queueIndex);
+  const playSeqRef = useRef(0);
 
   /* -------------------------- PLAY TRACK -------------------------- */
 
@@ -98,7 +99,23 @@ export const PlayerProvider = ({ children }) => {
 
     if (!track) return;
 
+    const seq = ++playSeqRef.current;
+
     setIsLoading(true);
+    setPlaybackError(null);
+
+    try {
+      // Stop current playback to avoid UI/audio desync while loading a new track.
+      await MusicPlayer.pause();
+    } catch {
+      // ignore (web/no plugin)
+    }
+
+    if (seq !== playSeqRef.current) return;
+
+    setIsPlaying(false);
+    setProgress(0);
+    setDuration(0);
     setCurrentTrack(track);
 
     try {
@@ -111,12 +128,16 @@ export const PlayerProvider = ({ children }) => {
 
         const details = await youtubeApi.getStreamDetails(videoId);
 
+        if (seq !== playSeqRef.current) return;
+
         if (!details?.streamUrl) {
           throw new Error("Stream fetch failed");
         }
 
         streamUrl = details.streamUrl;
       }
+
+      if (seq !== playSeqRef.current) return;
 
       await MusicPlayer.play({
         url: streamUrl,
@@ -125,15 +146,22 @@ export const PlayerProvider = ({ children }) => {
         artwork: track.coverArt || FALLBACK_COVER
       });
 
+      if (seq !== playSeqRef.current) return;
+
       setIsPlaying(true);
 
     } catch (error) {
 
       console.error("Playback error", error);
+      if (seq !== playSeqRef.current) return;
+      setIsPlaying(false);
+      setPlaybackError("Playback failed");
 
     } finally {
 
-      setIsLoading(false);
+      if (seq === playSeqRef.current) {
+        setIsLoading(false);
+      }
 
     }
 
@@ -166,6 +194,7 @@ export const PlayerProvider = ({ children }) => {
   const togglePlay = useCallback(async () => {
 
     if (!currentTrack) return;
+    if (isLoading) return;
 
     if (isPlaying) {
 
@@ -179,7 +208,7 @@ export const PlayerProvider = ({ children }) => {
 
     }
 
-  }, [isPlaying, currentTrack]);
+  }, [isPlaying, currentTrack, isLoading]);
 
   /* -------------------------- FETCH RECOMMENDATIONS (INFINITE AUTOPLAY) -------------------------- */
 
@@ -196,7 +225,9 @@ export const PlayerProvider = ({ children }) => {
         try {
           const upNext = await youtubeApi.getUpNextSafe(videoId);
           if (upNext.ok) results.push(...upNext.data);
-        } catch {}
+        } catch {
+          // ignore
+        }
       }
 
       // Strategy 2: Saavn suggestions (if Saavn track)
@@ -204,7 +235,9 @@ export const PlayerProvider = ({ children }) => {
         try {
           const suggestions = await saavnApi.getSongSuggestionsSafe(seedTrack.id);
           if (suggestions.ok) results.push(...suggestions.data);
-        } catch {}
+        } catch {
+          // ignore
+        }
       }
 
       // Strategy 3: Search by artist name
@@ -212,7 +245,9 @@ export const PlayerProvider = ({ children }) => {
         try {
           const artistRes = await youtubeApi.searchSongsSafe(seedTrack.artist, 10);
           if (artistRes.ok) results.push(...artistRes.data);
-        } catch {}
+        } catch {
+          // ignore
+        }
       }
 
       // Strategy 4: Search by title + artist keywords
@@ -221,7 +256,9 @@ export const PlayerProvider = ({ children }) => {
           const q = `${seedTrack.title} ${seedTrack.artist}`.trim();
           const similarRes = await youtubeApi.searchSongsSafe(q, 8);
           if (similarRes.ok) results.push(...similarRes.data);
-        } catch {}
+        } catch {
+          // ignore
+        }
       }
 
       // Deduplicate and filter out already played/queued tracks
@@ -288,7 +325,9 @@ export const PlayerProvider = ({ children }) => {
           loadAndPlay(recs[0]);
           return;
         }
-      } catch {}
+      } catch {
+        // ignore
+      }
     }
 
     // Repeat all wraps around
@@ -368,21 +407,27 @@ export const PlayerProvider = ({ children }) => {
         try {
           const upNext = await youtubeApi.getUpNextSafe(videoId);
           if (upNext.ok) results.push(...upNext.data);
-        } catch {}
+        } catch {
+          // ignore
+        }
       }
 
       if (seedTrack.source === 'saavn') {
         try {
           const suggestions = await saavnApi.getSongSuggestionsSafe(seedTrack.id);
           if (suggestions.ok) results.push(...suggestions.data);
-        } catch {}
+        } catch {
+          // ignore
+        }
       }
 
       if (results.length < 5 && seedTrack.artist) {
         try {
           const artistRes = await youtubeApi.searchSongsSafe(seedTrack.artist, 8);
           if (artistRes.ok) results.push(...artistRes.data);
-        } catch {}
+        } catch {
+          // ignore
+        }
       }
 
       // Deduplicate
@@ -550,7 +595,9 @@ export const PlayerProvider = ({ children }) => {
         })
       );
 
-    } catch { }
+    } catch {
+      // ignore
+    }
 
   }, [queue, queueIndex, currentTrack]);
 
@@ -645,6 +692,7 @@ export const PlayerProvider = ({ children }) => {
 
     dominantColor,
     isLoading,
+    playbackError,
 
     autoRadioEnabled,
     sleepTimerMinutes,
