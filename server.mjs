@@ -5,6 +5,7 @@
 
 import express from "express";
 import { Innertube } from "youtubei.js";
+import fs from "node:fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { createProxyMiddleware } from "http-proxy-middleware";
@@ -91,6 +92,28 @@ if (process.env.YT_COOKIES_FILE) {
 // resolve dirname
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Convenience: if no env var is set, look for a cookies export in the project root.
+// Note: for production, prefer setting an absolute `YT_COOKIES_FILE` path explicitly.
+if (!process.env.YT_COOKIES_FILE) {
+    const candidates = [
+        path.join(process.cwd(), 'cookies.txt'),
+        path.join(process.cwd(), 'cookies (1).txt'),
+    ];
+
+    const found = candidates.find((p) => {
+        try {
+            return fs.existsSync(p);
+        } catch {
+            return false;
+        }
+    });
+
+    if (found) {
+        process.env.YT_COOKIES_FILE = found;
+        logger.info('config', 'Auto-detected cookies file', { file: found });
+    }
+}
 
 const cachePromise = createCache();
 

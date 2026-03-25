@@ -25,6 +25,8 @@ dist-ssr
 
 # YouTube cookies export (secrets)
 cookies.txt
+cookies (1).txt
+cookies*.txt
 
 
 # Local debug artifacts (do not commit)
