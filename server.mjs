@@ -28,7 +28,7 @@ import { recordTrackIssue } from "./backend/feedback/issueStore.mjs";
 import { resolveStreamUrl, resolveStreamWithMeta } from "./backend/resolver/streamResolver.mjs";
 import { downloadToCache, getCachedFilePath, getCacheStatus } from "./backend/cache/audioCache.mjs";
 import { ytdlpQueue } from "./backend/queue/ytdlpQueue.mjs";
-import { buildYtdlpArgs } from "./backend/providers/ytdlpProvider.mjs";
+import { buildYtdlpArgs, getYtdlpProxy } from "./backend/providers/ytdlpProvider.mjs";
 import { spawnWithTimeout } from "./backend/lib/spawnWithTimeout.mjs";
 import { logger } from "./backend/lib/logger.mjs";
 import { metrics } from "./backend/lib/metrics.mjs";
@@ -92,6 +92,7 @@ const YT_DLP_BIN = process.env.YT_DLP_BIN || "yt-dlp";
 const YT_SOURCE_ADDRESS = process.env.YT_SOURCE_ADDRESS;
 const YT_EXTRACTOR_ARGS = process.env.YT_EXTRACTOR_ARGS || "";
 const YT_DLP_JS_RUNTIMES = process.env.YT_DLP_JS_RUNTIMES || "node";
+const YT_DLP_PROXY = getYtdlpProxy();
 
 const RECO_API_KEY = process.env.RECO_API_KEY || "";
 
@@ -121,6 +122,7 @@ logger.info("config", "yt-dlp runtime configuration", {
     bin: YT_DLP_BIN,
     jsRuntimes: YT_DLP_JS_RUNTIMES,
     hasCookiesFile: Boolean(process.env.YT_COOKIES_FILE),
+    hasProxy: Boolean(YT_DLP_PROXY),
 });
 
 // resolve dirname
@@ -1096,6 +1098,7 @@ app.get("/api/yt/health", (req, res) => {
             jsRuntimes: YT_DLP_JS_RUNTIMES,
             hasCookiesFile: Boolean(cookiesFile),
             cookiesFileExists: cookiesFile ? fs.existsSync(cookiesFile) : false,
+            hasProxy: Boolean(YT_DLP_PROXY),
         },
     });
 });
@@ -1145,6 +1148,7 @@ app.get("/api/yt/health/extract", async (req, res) => {
                 jsRuntimes: YT_DLP_JS_RUNTIMES,
                 hasCookiesFile: Boolean(cookiesFile),
                 cookiesFileExists: cookiesFile ? fs.existsSync(cookiesFile) : false,
+                hasProxy: Boolean(YT_DLP_PROXY),
             },
             stderr: stderr.slice(-1500),
         });
@@ -1158,6 +1162,7 @@ app.get("/api/yt/health/extract", async (req, res) => {
                 jsRuntimes: YT_DLP_JS_RUNTIMES,
                 hasCookiesFile: Boolean(cookiesFile),
                 cookiesFileExists: cookiesFile ? fs.existsSync(cookiesFile) : false,
+                hasProxy: Boolean(YT_DLP_PROXY),
             },
         });
     }

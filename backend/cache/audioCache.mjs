@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { spawn } from 'child_process';
 import { logger } from '../lib/logger.mjs';
+import { getYtdlpProxy } from '../providers/ytdlpProvider.mjs';
 
 const CACHE_DIR = path.resolve(process.env.AURA_AUDIO_CACHE_DIR || 'backend/cache/audio');
 const MAX_CACHE_BYTES = 1024 * 1024 * 1024;
@@ -139,6 +140,15 @@ export function downloadToCache(videoId, ytdlpBin) {
 
     if (process.env.YT_COOKIES_FILE) {
         args.push('--cookies', process.env.YT_COOKIES_FILE);
+    }
+
+    if (process.env.YT_DLP_JS_RUNTIMES) {
+        args.push('--js-runtimes', process.env.YT_DLP_JS_RUNTIMES);
+    }
+
+    const proxy = getYtdlpProxy();
+    if (proxy) {
+        args.push('--proxy', proxy);
     }
 
     args.push('--add-header', 'User-Agent: com.google.android.youtube/19.09.37 (Linux; Android 13)');

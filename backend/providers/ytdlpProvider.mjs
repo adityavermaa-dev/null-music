@@ -1,6 +1,16 @@
 import { logger } from '../lib/logger.mjs';
 import { spawnWithTimeout } from '../lib/spawnWithTimeout.mjs';
 
+export function getYtdlpProxy() {
+  return String(
+    process.env.YT_DLP_PROXY ||
+    process.env.YTDLP_PROXY ||
+    process.env.HTTPS_PROXY ||
+    process.env.HTTP_PROXY ||
+    ''
+  ).trim();
+}
+
 function collectStdout(proc, limit = 64 * 1024) {
   return new Promise((resolve, reject) => {
     let out = '';
@@ -33,6 +43,7 @@ export function buildYtdlpArgs(videoId, options = {}) {
     playerClient = process.env.YT_PLAYER_CLIENTS || 'android_vr',
     cookiesFile = process.env.YT_COOKIES_FILE,
     jsRuntimes = process.env.YT_DLP_JS_RUNTIMES || 'node',
+    proxy = getYtdlpProxy(),
     getUrl = false,
     outputToStdout = false,
   } = options;
@@ -43,6 +54,7 @@ export function buildYtdlpArgs(videoId, options = {}) {
   // Optional explicit cookies file (helps with sign-in / age-gated videos).
   if (cookiesFile) args.push('--cookies', cookiesFile);
   if (jsRuntimes) args.push('--js-runtimes', jsRuntimes);
+  if (proxy) args.push('--proxy', proxy);
 
   // Basic headers help reduce bot-gating, without requiring cookies.
   // (Do NOT add cookies here.)
@@ -95,6 +107,7 @@ export async function ytdlpGetUrl(bin, videoId, options = {}) {
       code,
       playerClient: options?.playerClient || process.env.YT_PLAYER_CLIENTS || 'android_vr',
       hasCookies: Boolean(process.env.YT_COOKIES_FILE),
+      hasProxy: Boolean(getYtdlpProxy()),
       stderr: err.slice(0, 300),
     });
     return null;
@@ -107,6 +120,7 @@ export async function ytdlpGetUrl(bin, videoId, options = {}) {
       code,
       playerClient: options?.playerClient || process.env.YT_PLAYER_CLIENTS || 'android_vr',
       hasCookies: Boolean(process.env.YT_COOKIES_FILE),
+      hasProxy: Boolean(getYtdlpProxy()),
       stderr: err.slice(0, 300),
     });
     return null;
