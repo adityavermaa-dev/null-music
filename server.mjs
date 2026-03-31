@@ -91,6 +91,7 @@ app.use((req, res, next) => {
 const YT_DLP_BIN = process.env.YT_DLP_BIN || "yt-dlp";
 const YT_SOURCE_ADDRESS = process.env.YT_SOURCE_ADDRESS;
 const YT_EXTRACTOR_ARGS = process.env.YT_EXTRACTOR_ARGS || "";
+const YT_DLP_JS_RUNTIMES = process.env.YT_DLP_JS_RUNTIMES || "node";
 
 const RECO_API_KEY = process.env.RECO_API_KEY || "";
 
@@ -115,6 +116,12 @@ function requireRecoApiKey(req, res, next) {
 if (process.env.YT_COOKIES_FILE) {
     logger.info("config", "Using YT_COOKIES_FILE for yt-dlp", { file: process.env.YT_COOKIES_FILE });
 }
+
+logger.info("config", "yt-dlp runtime configuration", {
+    bin: YT_DLP_BIN,
+    jsRuntimes: YT_DLP_JS_RUNTIMES,
+    hasCookiesFile: Boolean(process.env.YT_COOKIES_FILE),
+});
 
 // resolve dirname
 const __filename = fileURLToPath(import.meta.url);
@@ -1076,6 +1083,7 @@ app.get("/api/yt/up-next/:videoId", async (req, res) => {
 // ─────────────────────────────────────────────
 
 app.get("/api/yt/health", (req, res) => {
+    const cookiesFile = process.env.YT_COOKIES_FILE || "";
     res.json({
         status: "ok",
         cache: {
@@ -1083,7 +1091,76 @@ app.get("/api/yt/health", (req, res) => {
             namespace: process.env.CACHE_NAMESPACE || "aura",
         },
         hasSession: !!yt,
+        ytdlp: {
+            bin: YT_DLP_BIN,
+            jsRuntimes: YT_DLP_JS_RUNTIMES,
+            hasCookiesFile: Boolean(cookiesFile),
+            cookiesFileExists: cookiesFile ? fs.existsSync(cookiesFile) : false,
+        },
     });
+});
+
+app.get("/api/yt/health/extract", async (req, res) => {
+    const videoId = String(req.query?.videoId || "").trim();
+    if (!videoId) {
+        return res.status(400).json({ ok: false, error: "videoId query parameter is required" });
+    }
+
+    const cookiesFile = process.env.YT_COOKIES_FILE || "";
+    const args = buildYtdlpArgs(videoId, {
+        getUrl: true,
+        playerClient: "android_vr",
+        extractorArgs: YT_EXTRACTOR_ARGS,
+        sourceAddress: YT_SOURCE_ADDRESS,
+        jsRuntimes: YT_DLP_JS_RUNTIMES,
+    });
+
+    try {
+        const { proc, done } = spawnWithTimeout(YT_DLP_BIN, args, {
+            timeoutMs: Math.max(3000, Number(process.env.YTDLP_HEALTH_TIMEOUT_MS || 20000)),
+        });
+
+        let stdout = "";
+        let stderr = "";
+        proc.stdout?.on("data", (chunk) => {
+            stdout += chunk.toString();
+            if (stdout.length > 4096) stdout = stdout.slice(-4096);
+        });
+        proc.stderr?.on("data", (chunk) => {
+            stderr += chunk.toString();
+            if (stderr.length > 12000) stderr = stderr.slice(-12000);
+        });
+
+        const { code } = await done;
+        const url = stdout.trim().split(/\r?\n/)[0]?.trim() || "";
+
+        return res.json({
+            ok: Boolean(url),
+            videoId,
+            code,
+            hasUrl: Boolean(url),
+            urlPreview: url ? `${url.slice(0, 120)}...` : "",
+            ytdlp: {
+                bin: YT_DLP_BIN,
+                jsRuntimes: YT_DLP_JS_RUNTIMES,
+                hasCookiesFile: Boolean(cookiesFile),
+                cookiesFileExists: cookiesFile ? fs.existsSync(cookiesFile) : false,
+            },
+            stderr: stderr.slice(-1500),
+        });
+    } catch (error) {
+        return res.status(500).json({
+            ok: false,
+            videoId,
+            error: error?.message || "yt-dlp health check failed",
+            ytdlp: {
+                bin: YT_DLP_BIN,
+                jsRuntimes: YT_DLP_JS_RUNTIMES,
+                hasCookiesFile: Boolean(cookiesFile),
+                cookiesFileExists: cookiesFile ? fs.existsSync(cookiesFile) : false,
+            },
+        });
+    }
 });
 
 app.get("/api/metrics", (req, res) => {
