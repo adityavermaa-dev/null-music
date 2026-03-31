@@ -14,6 +14,8 @@ import {
 const trackA = { id: 'a', title: 'Track A' };
 const trackB = { id: 'b', title: 'Track B' };
 const trackC = { id: 'c', title: 'Track C' };
+const normalizedTrackA = { id: 'a', title: 'Track A', artist: 'Unknown', coverArt: '', source: 'youtube' };
+const normalizedTrackB = { id: 'b', title: 'Track B', artist: 'Unknown', coverArt: '', source: 'youtube' };
 
 test('buildPlaybackSession keeps search play in radio mode as a one-track seed queue', () => {
   const result = buildPlaybackSession({
@@ -67,9 +69,9 @@ test('session serialization and parsing restore queue state safely', () => {
   });
 
   assert.deepEqual(parseStoredSession(raw), {
-    queue: [trackA, trackB],
+    queue: [normalizedTrackA, normalizedTrackB],
     queueIndex: 1,
-    currentTrack: trackB,
+    currentTrack: normalizedTrackB,
   });
 
   assert.equal(parseStoredSession('not-json'), null);

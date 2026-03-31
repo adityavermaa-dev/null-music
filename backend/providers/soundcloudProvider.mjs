@@ -1,5 +1,6 @@
 import play from 'play-dl';
 import { logger } from '../lib/logger.mjs';
+import { pickBestTrackMatch, scoreTrackCandidate } from '../../shared/trackMatch.js';
 
 /**
  * Validates a SoundCloud URL and ensures it's playable.
@@ -43,9 +44,40 @@ export async function soundcloudGetAudioUrl(videoId, title, artist) {
             return null;
         }
 
-        // Try to get a stream URL for the best match. 
-        // Iterate through the top results in case the first is region-locked or paywalled (GO+).
-        for (const track of results) {
+        const match = pickBestTrackMatch(results, { title, artist }, {
+            getTitle: (track) => track?.name || track?.title || '',
+            getArtist: (track) =>
+                track?.user?.name ||
+                track?.user?.username ||
+                track?.channel?.name ||
+                track?.publisher?.name ||
+                '',
+        });
+
+        if (!match) {
+            logger.info('soundcloud', 'Rejected low-confidence SoundCloud fallback', { videoId, query });
+            return null;
+        }
+
+        // Try the best semantic match first, then fall through to the rest of the
+        // already-matching candidates in case the first stream is unavailable.
+        const rankedResults = [
+            match.candidate,
+            ...results.filter((track) => (
+                track !== match.candidate &&
+                scoreTrackCandidate({ title, artist }, track, {
+                    getTitle: (candidate) => candidate?.name || candidate?.title || '',
+                    getArtist: (candidate) =>
+                        candidate?.user?.name ||
+                        candidate?.user?.username ||
+                        candidate?.channel?.name ||
+                        candidate?.publisher?.name ||
+                        '',
+                }).isConfident
+            )),
+        ];
+
+        for (const track of rankedResults) {
             if (!track.url) continue;
 
             const streamUrl = await getSoundcloudStreamUrl(track.url);

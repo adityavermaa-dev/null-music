@@ -39,6 +39,14 @@ public class MusicPlugin extends Plugin {
     private final ExecutorService downloadExecutor = Executors.newSingleThreadExecutor();
     private final Set<String> canceledDownloads = new HashSet<>();
 
+    private void startMusicService(Intent intent) {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            getContext().startForegroundService(intent);
+        } else {
+            getContext().startService(intent);
+        }
+    }
+
     @Override
     public void load() {
         super.load();
@@ -100,11 +108,7 @@ public class MusicPlugin extends Plugin {
         intent.putExtra("artist", artist);
         intent.putExtra("artwork", artwork);
 
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-            getContext().startForegroundService(intent);
-        } else {
-            getContext().startService(intent);
-        }
+        startMusicService(intent);
         call.resolve();
     }
 
@@ -112,7 +116,7 @@ public class MusicPlugin extends Plugin {
     public void pause(PluginCall call) {
         Intent intent = new Intent(getContext(), MusicService.class);
         intent.setAction(MusicService.ACTION_PAUSE);
-        getContext().startService(intent);
+        startMusicService(intent);
         call.resolve();
     }
 
@@ -120,7 +124,7 @@ public class MusicPlugin extends Plugin {
     public void resume(PluginCall call) {
         Intent intent = new Intent(getContext(), MusicService.class);
         intent.setAction(MusicService.ACTION_RESUME);
-        getContext().startService(intent);
+        startMusicService(intent);
         call.resolve();
     }
 
@@ -131,7 +135,7 @@ public class MusicPlugin extends Plugin {
             Intent intent = new Intent(getContext(), MusicService.class);
             intent.setAction(MusicService.ACTION_SEEK);
             intent.putExtra("position", position.longValue() * 1000);
-            getContext().startService(intent);
+            startMusicService(intent);
         }
         call.resolve();
     }
@@ -149,7 +153,7 @@ public class MusicPlugin extends Plugin {
             intent.putExtra("queue", tracks.toString());
             intent.putExtra("currentIndex", currentIndex);
             intent.putExtra("offset", offset);
-            getContext().startService(intent);
+            startMusicService(intent);
             call.resolve();
         } catch (Exception e) {
             android.util.Log.e("MusicPlugin", "setQueue error", e);

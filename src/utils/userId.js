@@ -1,5 +1,12 @@
+import { getAuthenticatedUserId } from './authSession';
+
 export function getOrCreateUserId() {
   try {
+    const authenticatedUserId = getAuthenticatedUserId();
+    if (authenticatedUserId) {
+      return authenticatedUserId;
+    }
+
     const existing = localStorage.getItem('aura-user-id');
     if (existing) return existing;
 

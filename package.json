@@ -5,13 +5,14 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "server": "node server.mjs",
+    "server": "node --env-file=.env server.mjs",
     "dev:all": "node scripts/dev-all.mjs",
     "build": "vite build",
-    "start": "node server.mjs",
+    "start": "node --env-file=.env server.mjs",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "node --test"
+    "test": "node --test",
+    "migrate:json-to-postgres": "node --env-file=.env scripts/migrate-json-to-postgres.mjs"
   },
   "dependencies": {
     "@capacitor/core": "^8.1.0",
@@ -25,6 +26,7 @@
     "ioredis": "^5.10.1",
     "lucide-react": "^0.576.0",
     "p-queue": "^9.1.0",
+    "pg": "^8.20.0",
     "play-dl": "^1.9.7",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",

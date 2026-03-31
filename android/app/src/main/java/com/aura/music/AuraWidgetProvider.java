@@ -6,6 +6,7 @@ import android.appwidget.AppWidgetProvider;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.os.Build;
 import android.widget.RemoteViews;
 
 public class AuraWidgetProvider extends AppWidgetProvider {
@@ -58,11 +59,10 @@ public class AuraWidgetProvider extends AppWidgetProvider {
 
     private static PendingIntent getServiceIntent(Context context, String action, int requestCode) {
         Intent intent = new Intent(context, MusicService.class).setAction(action);
-        return PendingIntent.getService(
-            context,
-            requestCode,
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
-        );
+        int flags = PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            return PendingIntent.getForegroundService(context, requestCode, intent, flags);
+        }
+        return PendingIntent.getService(context, requestCode, intent, flags);
     }
 }

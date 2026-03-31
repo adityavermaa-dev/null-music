@@ -191,6 +191,11 @@ public class MusicService extends Service {
             @Override
             public void onPlayerError(PlaybackException error) {
                 android.util.Log.e("MusicService", "Playback error", error);
+                if (playNextFromQueue()) {
+                    updateNotification();
+                    updatePlaybackState();
+                    return;
+                }
                 Intent intent = new Intent(ACTION_PLAYBACK_ERROR);
                 intent.putExtra("message", error != null ? error.getMessage() : "Playback failed");
                 sendExplicitBroadcast(intent);
@@ -352,15 +357,25 @@ public class MusicService extends Service {
             for (int i = 0; i < arr.length(); i++) {
                 JSONObject obj = arr.getJSONObject(i);
                 trackQueue.add(new QueueItem(
+                    obj.optString("id", ""),
+                    obj.optInt("index", offset + i),
                     obj.optString("url", ""),
                     obj.optString("title", "Unknown"),
                     obj.optString("artist", "Unknown"),
                     obj.optString("artwork", "")
                 ));
             }
-            currentQueueIndex = index;
+            currentQueueIndex = Math.max(-1, Math.min(index, trackQueue.size() - 1));
             queueOffset = Math.max(0, offset);
+            if (currentQueueIndex >= 0 && currentQueueIndex < trackQueue.size()) {
+                QueueItem currentItem = trackQueue.get(currentQueueIndex);
+                currentTitle = currentItem.title;
+                currentArtist = currentItem.artist;
+                currentArtwork = currentItem.artwork;
+            }
             android.util.Log.d("MusicService", "Queue set: " + trackQueue.size() + " tracks, index=" + index);
+            updateNotification();
+            updatePlaybackState();
         } catch (Exception e) {
             android.util.Log.e("MusicService", "Failed to parse queue JSON", e);
         }
@@ -465,50 +480,70 @@ public class MusicService extends Service {
         return ret;
     }
 
-    private boolean playNextFromQueue() {
-        int nextIdx = currentQueueIndex + 1;
-        if (nextIdx >= 0 && nextIdx < trackQueue.size()) {
-            currentQueueIndex = nextIdx;
-            QueueItem item = trackQueue.get(nextIdx);
-            if (item.url != null && !item.url.isEmpty()) {
-                currentTitle = item.title;
-                currentArtist = item.artist;
-                currentArtwork = item.artwork;
-                playTrack(item.url);
-                // Notify JS about the change so UI can sync
-                Intent syncIntent = new Intent("com.aura.music.QUEUE_INDEX_CHANGED");
-                syncIntent.putExtra("index", queueOffset + nextIdx);
-                sendExplicitBroadcast(syncIntent);
-                return true;
-            }
+    private void broadcastQueueIndexChanged(QueueItem item) {
+        Intent syncIntent = new Intent("com.aura.music.QUEUE_INDEX_CHANGED");
+        int absoluteIndex = item != null ? item.absoluteIndex : -1;
+        if (absoluteIndex < 0) {
+            absoluteIndex = queueOffset + currentQueueIndex;
         }
-        return false;
+        syncIntent.putExtra("index", absoluteIndex);
+        syncIntent.putExtra("trackId", item != null ? item.trackId : "");
+        syncIntent.putExtra("title", item != null ? item.title : currentTitle);
+        syncIntent.putExtra("artist", item != null ? item.artist : currentArtist);
+        syncIntent.putExtra("artwork", item != null ? item.artwork : currentArtwork);
+        sendExplicitBroadcast(syncIntent);
+    }
+
+    private boolean playFromQueueDirection(int step) {
+        int nextIdx = currentQueueIndex;
+
+        while (true) {
+            nextIdx += step;
+            if (nextIdx < 0 || nextIdx >= trackQueue.size()) {
+                return false;
+            }
+
+            QueueItem item = trackQueue.get(nextIdx);
+            if (item == null || item.url == null || item.url.isEmpty()) {
+                continue;
+            }
+
+            currentQueueIndex = nextIdx;
+            currentTitle = item.title;
+            currentArtist = item.artist;
+            currentArtwork = item.artwork;
+            playTrack(item.url);
+            broadcastQueueIndexChanged(item);
+            return true;
+        }
+    }
+
+    private boolean playNextFromQueue() {
+        return playFromQueueDirection(1);
     }
 
     private boolean playPrevFromQueue() {
-        int prevIdx = currentQueueIndex - 1;
-        if (prevIdx >= 0 && prevIdx < trackQueue.size()) {
-            currentQueueIndex = prevIdx;
-            QueueItem item = trackQueue.get(prevIdx);
-            if (item.url != null && !item.url.isEmpty()) {
-                currentTitle = item.title;
-                currentArtist = item.artist;
-                currentArtwork = item.artwork;
-                playTrack(item.url);
-                Intent syncIntent = new Intent("com.aura.music.QUEUE_INDEX_CHANGED");
-                syncIntent.putExtra("index", queueOffset + prevIdx);
-                sendExplicitBroadcast(syncIntent);
-                return true;
-            }
-        }
-        return false;
+        return playFromQueueDirection(-1);
     }
 
     private void updatePlaybackState() {
-        int state = player.isPlaying() ? PlaybackStateCompat.STATE_PLAYING : PlaybackStateCompat.STATE_PAUSED;
+        int state = PlaybackStateCompat.STATE_NONE;
+        if (player != null) {
+            if (player.isPlaying()) {
+                state = PlaybackStateCompat.STATE_PLAYING;
+            } else if (player.getPlaybackState() == Player.STATE_BUFFERING) {
+                state = PlaybackStateCompat.STATE_BUFFERING;
+            } else {
+                state = PlaybackStateCompat.STATE_PAUSED;
+            }
+        }
+
+        long position = player != null ? Math.max(player.getCurrentPosition(), 0L) : 0L;
+        float speed = player != null && player.isPlaying() ? 1.0f : 0.0f;
         mediaSession.setPlaybackState(new PlaybackStateCompat.Builder()
-                .setState(state, player.getCurrentPosition(), 1.0f)
+                .setState(state, position, speed)
                 .setActions(PlaybackStateCompat.ACTION_PLAY | PlaybackStateCompat.ACTION_PAUSE |
+                        PlaybackStateCompat.ACTION_PLAY_PAUSE |
                         PlaybackStateCompat.ACTION_SKIP_TO_NEXT | PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS |
                         PlaybackStateCompat.ACTION_SEEK_TO)
                 .build());
@@ -524,15 +559,18 @@ public class MusicService extends Service {
         Intent notifyIntent = new Intent(this, MainActivity.class);
         PendingIntent pi = PendingIntent.getActivity(this, 0, notifyIntent, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
 
-        boolean isPlaying = player.isPlaying();
+        boolean isPlaying = player != null && player.isPlaying();
         
         NotificationCompat.Action playPauseAction = isPlaying ?
                 new NotificationCompat.Action(android.R.drawable.ic_media_pause, "Pause", getServiceIntent(ACTION_PAUSE)) :
                 new NotificationCompat.Action(android.R.drawable.ic_media_play, "Play", getServiceIntent(ACTION_RESUME));
 
+        long duration = player != null ? Math.max(player.getDuration(), 0L) : 0L;
+        mediaSession.setSessionActivity(pi);
         mediaSession.setMetadata(new MediaMetadataCompat.Builder()
                 .putString(MediaMetadataCompat.METADATA_KEY_TITLE, currentTitle)
                 .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, currentArtist)
+                .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, duration)
                 .build());
 
         return new NotificationCompat.Builder(this, CHANNEL_ID)
@@ -548,6 +586,7 @@ public class MusicService extends Service {
                 .setStyle(new MediaStyle()
                         .setMediaSession(mediaSession.getSessionToken())
                         .setShowActionsInCompactView(0, 1, 2))
+                .setOnlyAlertOnce(true)
                 .setOngoing(isPlaying)
                 .build();
     }
@@ -563,7 +602,11 @@ public class MusicService extends Service {
             case ACTION_SEEK: requestCode = 4; break;
             default: requestCode = 0; break;
         }
-        return PendingIntent.getService(this, requestCode, intent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        int flags = PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            return PendingIntent.getForegroundService(this, requestCode, intent, flags);
+        }
+        return PendingIntent.getService(this, requestCode, intent, flags);
     }
 
     public void playTrack(String url) {
@@ -618,12 +661,16 @@ public class MusicService extends Service {
 
     /* ── Queue item data class ── */
     private static class QueueItem {
+        final String trackId;
+        final int absoluteIndex;
         final String url;
         final String title;
         final String artist;
         final String artwork;
 
-        QueueItem(String url, String title, String artist, String artwork) {
+        QueueItem(String trackId, int absoluteIndex, String url, String title, String artist, String artwork) {
+            this.trackId = trackId;
+            this.absoluteIndex = absoluteIndex;
             this.url = url;
             this.title = title;
             this.artist = artist;

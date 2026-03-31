@@ -1,13 +1,13 @@
 import axios from 'axios';
 import { friendlyErrorMessage, logError } from '../utils/logger';
 
-import { API_BASE } from './apiBase';
+import { buildApiUrl } from './apiBase';
 
 const requestReco = async (tag, method, path, data, config, fallbackMessage) => {
   try {
     const response = await axios({
       method,
-      url: `${API_BASE}${path}`,
+      url: buildApiUrl(path),
       data,
       ...config,
     });

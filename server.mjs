@@ -12,6 +12,18 @@ import { createProxyMiddleware } from "http-proxy-middleware";
 import rateLimit from "express-rate-limit";
 import timeout from "connect-timeout";
 import { createCache } from "./backend/cache/cache.mjs";
+import { createAuthToken, extractBearerToken, verifyAuthToken } from "./backend/auth/token.mjs";
+import {
+    createOrUpdatePhoneUser,
+    createUser,
+    getUserById,
+    getUserLibrary,
+    loginUser,
+    updateUserLibrary,
+    updateUserPassword,
+} from "./backend/auth/userStore.mjs";
+import { sendPhoneOtp, verifyPhoneOtpCode } from "./backend/auth/phoneOtp.mjs";
+import { recordTrackIssue } from "./backend/feedback/issueStore.mjs";
 
 import { resolveStreamUrl, resolveStreamWithMeta } from "./backend/resolver/streamResolver.mjs";
 import { downloadToCache, getCachedFilePath, getCacheStatus } from "./backend/cache/audioCache.mjs";
@@ -21,6 +33,7 @@ import { spawnWithTimeout } from "./backend/lib/spawnWithTimeout.mjs";
 import { logger } from "./backend/lib/logger.mjs";
 import { metrics } from "./backend/lib/metrics.mjs";
 import { getRecommendations, trackUserAction } from "./backend/reco/recommendations.mjs";
+import { normalizeLibraryPayload } from "./shared/userLibrary.js";
 
 const PORT = process.env.PORT || 3001;
 const app = express();
@@ -42,8 +55,8 @@ if (TRUST_PROXY_RAW) {
     app.set('trust proxy', 1);
 }
 
-// JSON body parsing (used by /api/track)
-app.use(express.json({ limit: "50kb" }));
+// JSON body parsing (used by /api/* endpoints)
+app.use(express.json({ limit: "512kb" }));
 
 // basic health endpoint (deployment / load balancers)
 app.get("/health", (req, res) => {
@@ -159,12 +172,62 @@ async function getYT() {
 
 app.use((req, res, next) => {
     res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Methods", "GET,POST,PUT,OPTIONS");
     res.header(
         "Access-Control-Allow-Headers",
         "Origin, X-Requested-With, Content-Type, Accept, Authorization, X-API-Key, x-api-key"
     );
+    res.header("Access-Control-Max-Age", "86400");
+    if (req.method === "OPTIONS") {
+        return res.sendStatus(204);
+    }
     next();
 });
+
+async function requireAuth(req, res, next) {
+    try {
+        const token = extractBearerToken(req.get("authorization") || "");
+        const auth = await verifyAuthToken(token);
+
+        if (!auth?.userId) {
+            return res.status(401).json({ ok: false, error: "Please sign in again." });
+        }
+
+        const user = await getUserById(auth.userId);
+        if (!user?.id) {
+            return res.status(401).json({ ok: false, error: "Please sign in again." });
+        }
+
+        req.auth = {
+            ...auth,
+            user,
+        };
+        return next();
+    } catch (error) {
+        logger.warn("auth", "Authentication failed", { error: error?.message });
+        return res.status(401).json({ ok: false, error: "Please sign in again." });
+    }
+}
+
+function getErrorStatus(error, fallback = 500) {
+    return Number(error?.status) || fallback;
+}
+
+function getErrorMessage(error, fallback = "Something went wrong.") {
+    const status = getErrorStatus(error, 500);
+    if (status >= 500) return fallback;
+    return error?.message || fallback;
+}
+
+async function buildSessionPayload(session) {
+    const token = await createAuthToken(session.user);
+    return {
+        ok: true,
+        token,
+        user: session.user,
+        library: session.library,
+    };
+}
 
 // ─────────────────────────────────────────────
 // saavn proxy (placed BEFORE rate limiter so fallback requests aren't throttled)
@@ -221,6 +284,138 @@ app.use((req, res, next) => {
 // ─────────────────────────────────────────────
 // user tracking + recommendations
 // ─────────────────────────────────────────────
+
+app.post("/api/auth/signup", async (req, res) => {
+    try {
+        const { email, password, name } = req.body || {};
+        const created = await createUser({ email, password, name });
+        return res.status(201).json(await buildSessionPayload(created));
+    } catch (error) {
+        logger.warn("auth", "Signup failed", { error: error?.message });
+        return res.status(getErrorStatus(error, 500)).json({
+            ok: false,
+            error: getErrorMessage(error, "Unable to create account right now."),
+        });
+    }
+});
+
+app.post("/api/auth/login", async (req, res) => {
+    try {
+        const { email, password } = req.body || {};
+        const session = await loginUser({ email, password });
+        return res.json(await buildSessionPayload(session));
+    } catch (error) {
+        logger.warn("auth", "Login failed", { error: error?.message });
+        return res.status(getErrorStatus(error, 500)).json({
+            ok: false,
+            error: getErrorMessage(error, "Unable to sign in right now."),
+        });
+    }
+});
+
+app.post("/api/auth/phone/send-otp", async (req, res) => {
+    try {
+        const { phone } = req.body || {};
+        const result = await sendPhoneOtp(phone);
+        return res.json({ ok: true, phone: result.phone, status: result.status });
+    } catch (error) {
+        logger.warn("auth", "Phone OTP send failed", { error: error?.message });
+        return res.status(getErrorStatus(error, 500)).json({
+            ok: false,
+            error: getErrorMessage(error, "Phone OTP is unavailable right now."),
+        });
+    }
+});
+
+app.post("/api/auth/phone/verify-otp", async (req, res) => {
+    try {
+        const { phone, code, name } = req.body || {};
+        const verification = await verifyPhoneOtpCode(phone, code);
+        const session = await createOrUpdatePhoneUser({
+            phone: verification.phone,
+            name,
+        });
+        return res.json(await buildSessionPayload(session));
+    } catch (error) {
+        logger.warn("auth", "Phone OTP verify failed", { error: error?.message });
+        return res.status(getErrorStatus(error, 500)).json({
+            ok: false,
+            error: getErrorMessage(error, "Phone OTP verification failed."),
+        });
+    }
+});
+
+app.get("/api/auth/me", requireAuth, async (req, res) => {
+    return res.json({
+        ok: true,
+        user: req.auth.user,
+    });
+});
+
+app.post("/api/auth/change-password", requireAuth, async (req, res) => {
+    try {
+        const { currentPassword, newPassword } = req.body || {};
+        const user = await updateUserPassword({
+            userId: req.auth.user.id,
+            currentPassword,
+            newPassword,
+        });
+        return res.json({ ok: true, user });
+    } catch (error) {
+        logger.warn("auth", "Password change failed", { error: error?.message, userId: req.auth?.user?.id });
+        return res.status(getErrorStatus(error, 500)).json({
+            ok: false,
+            error: getErrorMessage(error, "Password update failed."),
+        });
+    }
+});
+
+app.get("/api/library", requireAuth, async (req, res) => {
+    try {
+        const library = await getUserLibrary(req.auth.user.id);
+        return res.json({ ok: true, library });
+    } catch (error) {
+        logger.warn("library", "Failed to load user library", { error: error?.message, userId: req.auth?.user?.id });
+        return res.status(getErrorStatus(error, 500)).json({
+            ok: false,
+            error: getErrorMessage(error, "Unable to load your library right now."),
+        });
+    }
+});
+
+app.put("/api/library", requireAuth, async (req, res) => {
+    try {
+        const library = normalizeLibraryPayload(req.body || {});
+        const saved = await updateUserLibrary(req.auth.user.id, library);
+        return res.json({ ok: true, library: saved });
+    } catch (error) {
+        logger.warn("library", "Failed to update user library", { error: error?.message, userId: req.auth?.user?.id });
+        return res.status(getErrorStatus(error, 500)).json({
+            ok: false,
+            error: getErrorMessage(error, "Unable to save your library right now."),
+        });
+    }
+});
+
+app.post("/api/feedback/track-issue", async (req, res) => {
+    try {
+        const token = extractBearerToken(req.get("authorization") || "");
+        const auth = token ? await verifyAuthToken(token) : null;
+        const issue = await recordTrackIssue({
+            ...(req.body || {}),
+            userId: auth?.userId || req.body?.userId || "",
+            userEmail: auth?.email || "",
+            source: "app",
+        });
+        return res.status(201).json({ ok: true, issueId: issue.id });
+    } catch (error) {
+        logger.warn("feedback", "Track issue report failed", { error: error?.message });
+        return res.status(getErrorStatus(error, 500)).json({
+            ok: false,
+            error: getErrorMessage(error, "Could not send the issue report right now."),
+        });
+    }
+});
 
 app.post("/api/track", requireRecoApiKey, async (req, res) => {
     try {

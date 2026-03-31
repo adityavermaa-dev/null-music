@@ -29,6 +29,7 @@ import {
   loadStoredTrackCollections
 } from "../utils/recommendationFallback";
 import { MusicPlayer } from "../native/musicPlayer";
+import { pickBestTrackMatch } from "../../shared/trackMatch.js";
 
 const PlayerContext = createContext();
 
@@ -57,8 +58,44 @@ function getColor(img) {
 const FALLBACK_COVER =
   "https://placehold.co/500x500/27272a/71717a?text=%E2%99%AA";
 const YOUTUBE_CACHE_PATH = "/api/yt/cache/";
-const REMOTE_STREAM_RECHECK_MS = 12_000;
+const CACHE_PROMOTION_RECHECK_MS = 12_000;
+const STREAM_URL_REUSE_MS = 30 * 60 * 1000;
 const MAX_RELIABILITY_EVENTS = 18;
+const PLAYBACK_ERROR_RECOVERY_DELAY_MS = 350;
+const PLAYER_SESSION_STORAGE_KEY = "aura-player-session";
+const AUTO_RADIO_STORAGE_KEY = "aura-auto-radio";
+const PLAYBACK_PROFILE_STORAGE_KEY = "aura-playback-profile";
+const OFFLINE_ONLY_STORAGE_KEY = "aura-offline-only";
+const RESUME_STORAGE_KEY = "aura-resume-state";
+
+function normalizePlaybackProfile(value) {
+  return value === "data-saver" || value === "instant" ? value : "balanced";
+}
+
+function readStoredJson(key, fallback = null) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function normalizeResumeState(value) {
+  if (!value || typeof value !== "object") return null;
+  const track = value.track && typeof value.track === "object" ? value.track : null;
+  const queue = Array.isArray(value.queue) ? value.queue.filter(Boolean) : [];
+  const queueIndex = Number.isInteger(value.queueIndex) ? value.queueIndex : -1;
+  const position = Number(value.position || 0);
+  if (!track?.id) return null;
+  return {
+    track,
+    queue,
+    queueIndex,
+    position: Number.isFinite(position) ? Math.max(0, position) : 0,
+    capturedAt: Number(value.capturedAt || Date.now()),
+  };
+}
 
 function isYoutubeCacheUrl(url = "") {
   return typeof url === "string" && url.includes(YOUTUBE_CACHE_PATH);
@@ -86,14 +123,29 @@ export const PlayerProvider = ({ children }) => {
 
   const [autoRadioEnabled, setAutoRadioEnabled] = useState(() => {
     try {
-      const stored = localStorage.getItem("aura-auto-radio");
+      const stored = localStorage.getItem(AUTO_RADIO_STORAGE_KEY);
       return stored == null ? true : stored === "true";
     } catch {
       return true;
     }
   });
+  const [playbackProfile, setPlaybackProfileState] = useState(() => {
+    try {
+      return normalizePlaybackProfile(localStorage.getItem(PLAYBACK_PROFILE_STORAGE_KEY));
+    } catch {
+      return "balanced";
+    }
+  });
+  const [offlineOnlyMode, setOfflineOnlyModeState] = useState(() => {
+    try {
+      return localStorage.getItem(OFFLINE_ONLY_STORAGE_KEY) === "true";
+    } catch {
+      return false;
+    }
+  });
   const [sleepTimerMinutes, setSleepTimerMinutes] = useState(null);
   const [volume, setVolumeState] = useState(0.8);
+  const [resumeState, setResumeState] = useState(() => normalizeResumeState(readStoredJson(RESUME_STORAGE_KEY, null)));
   const [equalizerState, setEqualizerState] = useState({
     available: false,
     enabled: false,
@@ -115,6 +167,7 @@ export const PlayerProvider = ({ children }) => {
   const queueModeRef = useRef(queueMode);
   const autoRadioEnabledRef = useRef(autoRadioEnabled);
   const isLoadingRef = useRef(isLoading);
+  const isPlayingRef = useRef(isPlaying);
 
   const playedIdsRef = useRef(new Set());
   const isFetchingRecsRef = useRef(false);
@@ -128,6 +181,8 @@ export const PlayerProvider = ({ children }) => {
   const playSeqRef = useRef(0);
   const nativeQueueSyncSeqRef = useRef(0);
   const resolvedTrackMapRef = useRef(new Map());
+  const playbackRecoveryTimeoutRef = useRef(null);
+  const resumeSeekRef = useRef(null);
 
   /* ── Gapless playback: pre-resolve next track URL ── */
   const preResolvedRef = useRef({ trackId: null, resolvedTrack: null, resolving: false });
@@ -155,6 +210,47 @@ export const PlayerProvider = ({ children }) => {
       events: [],
     }));
   }, []);
+
+  const clearPlaybackRecovery = useCallback(() => {
+    if (playbackRecoveryTimeoutRef.current) {
+      clearTimeout(playbackRecoveryTimeoutRef.current);
+      playbackRecoveryTimeoutRef.current = null;
+    }
+  }, []);
+
+  const schedulePlaybackRecovery = useCallback((failedTrackId) => {
+    clearPlaybackRecovery();
+
+    playbackRecoveryTimeoutRef.current = setTimeout(() => {
+      playbackRecoveryTimeoutRef.current = null;
+
+      if (isLoadingRef.current || isPlayingRef.current) {
+        return;
+      }
+
+      const queueSnapshot = queueRef.current;
+      const activeIndex = queueIndexRef.current;
+      const indexedTrack =
+        activeIndex >= 0 && activeIndex < queueSnapshot.length
+          ? queueSnapshot[activeIndex]
+          : null;
+      const activeTrack = indexedTrack || currentTrackRef.current;
+      const activeTrackId = activeTrack?.id || null;
+      const hasAnotherTrack = Array.isArray(queueSnapshot) && queueSnapshot.some((item, index) => (
+        index !== activeIndex && item?.id && item.id !== failedTrackId
+      ));
+
+      if (failedTrackId && activeTrackId && activeTrackId !== failedTrackId) {
+        return;
+      }
+
+      if (!hasAnotherTrack && !autoRadioEnabledRef.current && repeatModeRef.current !== 'all') {
+        return;
+      }
+
+      skipNextRef.current?.();
+    }, PLAYBACK_ERROR_RECOVERY_DELAY_MS);
+  }, [clearPlaybackRecovery]);
 
   const getRecommendationSnapshot = useCallback(async () => {
     const userId = getOrCreateUserId();
@@ -189,6 +285,7 @@ export const PlayerProvider = ({ children }) => {
     streamSource: patch.streamSource || baseTrack?.streamSource || null,
     cacheState: patch.cacheState || baseTrack?.cacheState || null,
     cacheCheckedAt: patch.cacheCheckedAt || baseTrack?.cacheCheckedAt || 0,
+    streamResolvedAt: patch.streamResolvedAt || baseTrack?.streamResolvedAt || 0,
   }), []);
 
   const getResolvedTrackFromCache = useCallback((track) => {
@@ -266,7 +363,13 @@ export const PlayerProvider = ({ children }) => {
     }
     if (!result.ok || !Array.isArray(result.data) || result.data.length === 0) return null;
 
-    const saavnTrack = saavnApi.formatTrack(result.data[0]);
+    const matchedTrack = pickBestTrackMatch(
+      result.data.map((item) => saavnApi.formatTrack(item)),
+      track
+    );
+    if (!matchedTrack?.candidate?.streamUrl) return null;
+
+    const saavnTrack = matchedTrack.candidate;
     return saavnTrack?.streamUrl || null;
   }, []);
 
@@ -275,23 +378,33 @@ export const PlayerProvider = ({ children }) => {
     if (!track) throw new Error("Track is required");
 
     track = getResolvedTrackFromCache(track);
+    const currentUrl = typeof track.streamUrl === "string" ? track.streamUrl.trim() : "";
+    const isLocalFile = currentUrl.startsWith("file:");
+
+    if (offlineOnlyMode && track.source !== "downloaded" && !isLocalFile) {
+      throw new Error("Offline-only mode is enabled.");
+    }
 
     const isNative = Capacitor.isNativePlatform();
-    const existingUrl = typeof track.streamUrl === "string" ? track.streamUrl.trim() : "";
+    const existingUrl = currentUrl;
     const isPipeUrl = existingUrl.includes("/api/yt/pipe/");
     const isCacheUrl = isYoutubeCacheUrl(existingUrl);
     const lastCacheCheck = Number(track.cacheCheckedAt || 0);
-    const recentlyChecked = Date.now() - lastCacheCheck < REMOTE_STREAM_RECHECK_MS;
+    const lastResolvedAt = Number(track.streamResolvedAt || track.cacheCheckedAt || 0);
+    const recentlyResolved = Date.now() - lastResolvedAt < STREAM_URL_REUSE_MS;
 
     if (!forceRefresh && existingUrl) {
       const shouldReuseExisting =
         track.source !== "youtube" ||
         !isNative ||
         isCacheUrl ||
-        (!isPipeUrl && recentlyChecked);
+        (!isPipeUrl && recentlyResolved);
 
       if (shouldReuseExisting) {
-        return mergeResolvedTrack(track, { streamUrl: existingUrl });
+        return mergeResolvedTrack(track, {
+          streamUrl: existingUrl,
+          streamResolvedAt: lastResolvedAt || Date.now(),
+        });
       }
     }
 
@@ -304,6 +417,7 @@ export const PlayerProvider = ({ children }) => {
       const resolved = mergeResolvedTrack(track, {
         streamUrl: existingUrl,
         streamSource: track.streamSource || track.source || 'direct',
+        streamResolvedAt: Date.now(),
       });
       if (record) {
         recordReliabilityEvent('resolved', {
@@ -336,6 +450,7 @@ export const PlayerProvider = ({ children }) => {
       streamSource: details?.streamSource || (isYoutubeCacheUrl(streamUrl) ? "disk-cache" : "unknown"),
       cacheState: details?.cacheState || (isYoutubeCacheUrl(streamUrl) ? "disk" : null),
       cacheCheckedAt: isNative ? Date.now() : lastCacheCheck,
+      streamResolvedAt: Date.now(),
     });
     if (record) {
       const fallbackSources = new Set(['piped', 'ytdl-core', 'soundcloud', 'yt-dlp']);
@@ -358,7 +473,7 @@ export const PlayerProvider = ({ children }) => {
       }
     }
     return resolved;
-  }, [getResolvedTrackFromCache, mergeResolvedTrack, recordReliabilityEvent, trySaavnFallback]);
+  }, [getResolvedTrackFromCache, mergeResolvedTrack, offlineOnlyMode, recordReliabilityEvent, trySaavnFallback]);
 
   /** Pre-resolve stream URL for a track (used for gapless preloading). */
   const preResolveStream = useCallback(async (track) => {
@@ -373,7 +488,7 @@ export const PlayerProvider = ({ children }) => {
         persistResolvedTrack(resolvedTrack);
         preResolvedRef.current = { trackId, resolvedTrack, resolving: false };
         // Preload audio on web for instant start
-        if (!Capacitor.isNativePlatform()) {
+        if (!Capacitor.isNativePlatform() && playbackProfile !== "data-saver") {
           try {
             if (preloadAudioRef.current) { preloadAudioRef.current.src = ''; }
             const audio = new Audio();
@@ -388,7 +503,7 @@ export const PlayerProvider = ({ children }) => {
     } catch {
       preResolvedRef.current = { trackId: null, resolvedTrack: null, resolving: false };
     }
-  }, [persistResolvedTrack, resolvePlayableTrack]);
+  }, [persistResolvedTrack, playbackProfile, resolvePlayableTrack]);
 
   const loadAndPlay = useCallback(async (track) => {
 
@@ -437,10 +552,23 @@ export const PlayerProvider = ({ children }) => {
 
       if (seq !== playSeqRef.current) return;
 
+      const pendingResumeSeek = resumeSeekRef.current;
+      if (pendingResumeSeek?.trackId === resolvedTrack.id && pendingResumeSeek.position > 0) {
+        try {
+          await MusicPlayer.seek({ position: pendingResumeSeek.position });
+          setProgress(pendingResumeSeek.position);
+        } catch {
+          // ignore resume seek failures
+        } finally {
+          resumeSeekRef.current = null;
+        }
+      }
+
       persistResolvedTrack(resolvedTrack);
       setCurrentTrack(resolvedTrack);
       currentTrackRef.current = resolvedTrack;
       setIsPlaying(true);
+      clearPlaybackRecovery();
       recordReliabilityEvent('playing', {
         trackId: resolvedTrack.id,
         title: resolvedTrack.title,
@@ -480,6 +608,7 @@ export const PlayerProvider = ({ children }) => {
             currentTrackRef.current = refreshedTrack;
             setIsPlaying(true);
             setPlaybackError(null);
+            clearPlaybackRecovery();
             recordReliabilityEvent('fallback', {
               trackId: refreshedTrack.id,
               title: refreshedTrack.title,
@@ -507,6 +636,7 @@ export const PlayerProvider = ({ children }) => {
               streamUrl: saavnUrl,
               streamSource: 'saavn-fallback',
               cacheState: 'fallback',
+              streamResolvedAt: Date.now(),
             });
             await MusicPlayer.play({
               url: saavnUrl,
@@ -520,6 +650,7 @@ export const PlayerProvider = ({ children }) => {
             currentTrackRef.current = fallbackTrack;
             setIsPlaying(true);
             setPlaybackError(null);
+            clearPlaybackRecovery();
             recordReliabilityEvent('fallback', {
               trackId: fallbackTrack.id,
               title: fallbackTrack.title,
@@ -547,6 +678,7 @@ export const PlayerProvider = ({ children }) => {
         title: track.title,
         message: error?.message || 'Song not available',
       });
+      schedulePlaybackRecovery(track.id);
 
     } finally {
 
@@ -556,7 +688,15 @@ export const PlayerProvider = ({ children }) => {
 
     }
 
-  }, [mergeResolvedTrack, persistResolvedTrack, recordReliabilityEvent, resolvePlayableTrack, trySaavnFallback]);
+  }, [
+    clearPlaybackRecovery,
+    mergeResolvedTrack,
+    persistResolvedTrack,
+    recordReliabilityEvent,
+    resolvePlayableTrack,
+    schedulePlaybackRecovery,
+    trySaavnFallback
+  ]);
 
   /* -------------------------- PLAY SESSION -------------------------- */
 
@@ -564,6 +704,7 @@ export const PlayerProvider = ({ children }) => {
 
     if (!track) return;
 
+    clearPlaybackRecovery();
     const hydratedTrack = getResolvedTrackFromCache(track);
     const hydratedTrackList = Array.isArray(trackList)
       ? trackList.map((item) => getResolvedTrackFromCache(item))
@@ -575,6 +716,10 @@ export const PlayerProvider = ({ children }) => {
       mode: options.mode
     });
 
+    queueModeRef.current = session.queueMode;
+    queueRef.current = session.queue;
+    queueIndexRef.current = session.queueIndex;
+    currentTrackRef.current = hydratedTrack;
     setQueueMode(session.queueMode);
     setQueue(session.queue);
     setQueueIndex(session.queueIndex);
@@ -583,7 +728,7 @@ export const PlayerProvider = ({ children }) => {
 
     loadAndPlay(hydratedTrack);
 
-  }, [getResolvedTrackFromCache, loadAndPlay]);
+  }, [clearPlaybackRecovery, getResolvedTrackFromCache, loadAndPlay]);
 
   /* -------------------------- TOGGLE PLAY -------------------------- */
 
@@ -705,6 +850,7 @@ export const PlayerProvider = ({ children }) => {
           nextIndex = Math.floor(Math.random() * queue.length);
         } while (nextIndex === queueIndex && queue.length > 1);
       }
+      queueIndexRef.current = nextIndex;
       setQueueIndex(nextIndex);
       loadAndPlay(queue[nextIndex]);
       return;
@@ -713,6 +859,7 @@ export const PlayerProvider = ({ children }) => {
     nextIndex = queueIndex + 1;
 
     if (nextIndex < queue.length) {
+      queueIndexRef.current = nextIndex;
       setQueueIndex(nextIndex);
       loadAndPlay(queue[nextIndex]);
       return;
@@ -727,6 +874,8 @@ export const PlayerProvider = ({ children }) => {
 
         if (recs.length > 0) {
           const newQueue = [...queue, ...recs];
+          queueRef.current = newQueue;
+          queueIndexRef.current = queue.length;
           setQueue(newQueue);
           setQueueIndex(queue.length);
           loadAndPlay(recs[0]);
@@ -739,6 +888,7 @@ export const PlayerProvider = ({ children }) => {
 
     // Repeat all wraps around
     if (repeatMode === 'all' && queue.length > 0) {
+      queueIndexRef.current = 0;
       setQueueIndex(0);
       loadAndPlay(queue[0]);
       return;
@@ -761,6 +911,7 @@ export const PlayerProvider = ({ children }) => {
 
     if (prevIndex == null) return;
 
+    queueIndexRef.current = prevIndex;
     setQueueIndex(prevIndex);
     loadAndPlay(queue[prevIndex]);
 
@@ -900,6 +1051,56 @@ export const PlayerProvider = ({ children }) => {
 
   }, []);
 
+  const setPlaybackProfile = useCallback((profile) => {
+    setPlaybackProfileState(normalizePlaybackProfile(profile));
+  }, []);
+
+  const cyclePlaybackProfile = useCallback(() => {
+    setPlaybackProfileState((previous) => (
+      previous === "data-saver"
+        ? "balanced"
+        : previous === "balanced"
+          ? "instant"
+          : "data-saver"
+    ));
+  }, []);
+
+  const toggleOfflineOnlyMode = useCallback(() => {
+    setOfflineOnlyModeState((previous) => !previous);
+  }, []);
+
+  const clearResumeState = useCallback(() => {
+    setResumeState(null);
+    resumeSeekRef.current = null;
+    try {
+      localStorage.removeItem(RESUME_STORAGE_KEY);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const resumePlayback = useCallback((snapshot = resumeState) => {
+    const normalized = normalizeResumeState(snapshot);
+    if (!normalized?.track) return;
+
+    const nextQueue = normalized.queue?.length > 0 ? normalized.queue : [normalized.track];
+    const boundedIndex = normalized.queueIndex >= 0 && normalized.queueIndex < nextQueue.length
+      ? normalized.queueIndex
+      : Math.max(0, nextQueue.findIndex((item) => item?.id === normalized.track.id));
+
+    queueModeRef.current = "list";
+    queueRef.current = nextQueue;
+    queueIndexRef.current = boundedIndex;
+    setQueueMode("list");
+    setQueue(nextQueue);
+    setQueueIndex(boundedIndex);
+    resumeSeekRef.current = {
+      trackId: normalized.track.id,
+      position: normalized.position || 0,
+    };
+    loadAndPlay(normalized.track);
+  }, [loadAndPlay, resumeState]);
+
   /* ----------- KEEP REFS IN SYNC FOR NATIVE LISTENERS ----------- */
 
   useEffect(() => { skipNextRef.current = skipNext; }, [skipNext]);
@@ -908,6 +1109,7 @@ export const PlayerProvider = ({ children }) => {
   useEffect(() => { queueModeRef.current = queueMode; }, [queueMode]);
   useEffect(() => { autoRadioEnabledRef.current = autoRadioEnabled; }, [autoRadioEnabled]);
   useEffect(() => { isLoadingRef.current = isLoading; }, [isLoading]);
+  useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
   useEffect(() => { currentTrackRef.current = currentTrack; }, [currentTrack]);
   useEffect(() => { repeatModeRef.current = repeatMode; }, [repeatMode]);
   useEffect(() => { loadAndPlayRef.current = loadAndPlay; }, [loadAndPlay]);
@@ -916,11 +1118,31 @@ export const PlayerProvider = ({ children }) => {
 
   useEffect(() => {
     try {
-      localStorage.setItem("aura-auto-radio", String(autoRadioEnabled));
+      localStorage.setItem(AUTO_RADIO_STORAGE_KEY, String(autoRadioEnabled));
     } catch {
       // ignore storage failures
     }
   }, [autoRadioEnabled]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(PLAYBACK_PROFILE_STORAGE_KEY, playbackProfile);
+    } catch {
+      // ignore storage failures
+    }
+  }, [playbackProfile]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(OFFLINE_ONLY_STORAGE_KEY, String(offlineOnlyMode));
+    } catch {
+      // ignore storage failures
+    }
+  }, [offlineOnlyMode]);
+
+  useEffect(() => () => {
+    clearPlaybackRecovery();
+  }, [clearPlaybackRecovery]);
 
   /* Track played IDs to avoid recommending already-heard songs */
   useEffect(() => {
@@ -1045,7 +1267,7 @@ export const PlayerProvider = ({ children }) => {
     try {
 
       localStorage.setItem(
-        "aura-player-session",
+        PLAYER_SESSION_STORAGE_KEY,
         serializeSession({
           queue,
           queueIndex,
@@ -1062,7 +1284,7 @@ export const PlayerProvider = ({ children }) => {
   useEffect(() => {
 
     const saved = parseStoredSession(
-      localStorage.getItem("aura-player-session")
+      localStorage.getItem(PLAYER_SESSION_STORAGE_KEY)
     );
 
     if (!saved) return;
@@ -1072,6 +1294,31 @@ export const PlayerProvider = ({ children }) => {
     setCurrentTrack(saved.currentTrack);
 
   }, []);
+
+  useEffect(() => {
+    if (!currentTrack?.id || !Number.isFinite(progress) || progress <= 8) return;
+
+    const nearEnd = duration > 0 && progress >= Math.max(duration - 8, duration * 0.96);
+    if (nearEnd) {
+      clearResumeState();
+      return;
+    }
+
+    const snapshot = {
+      track: currentTrack,
+      queue,
+      queueIndex,
+      position: progress,
+      capturedAt: Date.now(),
+    };
+
+    setResumeState(snapshot);
+    try {
+      localStorage.setItem(RESUME_STORAGE_KEY, JSON.stringify(snapshot));
+    } catch {
+      // ignore storage failures
+    }
+  }, [clearResumeState, currentTrack, duration, progress, queue, queueIndex]);
 
   /* -------------------------- LOCK SCREEN CONTROLS & AUTOPLAY -------------------------- */
 
@@ -1114,15 +1361,17 @@ export const PlayerProvider = ({ children }) => {
             title: activeTrack?.title || 'Unknown',
             message: msg || 'Song not available',
           });
+          schedulePlaybackRecovery(activeTrack?.id || null);
         });
 
         // Sync state when native background player auto-plays next track
         queueIndexListener = await MusicPlayer.addListener('queueIndexChanged', (data) => {
           const newIdx = data.index;
           if (newIdx >= 0 && newIdx < queueRef.current.length) {
+            clearPlaybackRecovery();
             queueIndexRef.current = newIdx;
             setQueueIndex(newIdx);
-            const track = queueRef.current[newIdx];
+            const track = getResolvedTrackFromCache(queueRef.current[newIdx]);
             setCurrentTrack(track);
             currentTrackRef.current = track;
             setIsPlaying(true);
@@ -1141,7 +1390,7 @@ export const PlayerProvider = ({ children }) => {
       errorListener?.remove?.();
       queueIndexListener?.remove?.();
     };
-  }, [recordReliabilityEvent]);
+  }, [clearPlaybackRecovery, getResolvedTrackFromCache, recordReliabilityEvent, schedulePlaybackRecovery]);
 
   /* -------------------------- PRE-FETCH RECOMMENDATIONS -------------------------- */
 
@@ -1161,19 +1410,21 @@ export const PlayerProvider = ({ children }) => {
   }, [queueIndex, queue, autoRadioEnabled, currentTrack, fetchRecommendations]);
 
   useEffect(() => {
+    if (playbackProfile === "data-saver") return;
     if (!queue.length || queueIndex < 0) return;
     const nextTrack = queue[queueIndex + 1];
     if (nextTrack) {
       preResolveStream(nextTrack);
     }
-  }, [queue, queueIndex, preResolveStream]);
+  }, [playbackProfile, queue, queueIndex, preResolveStream]);
 
   /* ----------- GAPLESS: Pre-resolve next track URL at 75% progress ----------- */
 
   useEffect(() => {
     if (!duration || duration <= 0 || !isPlaying) return;
+    const lowerThreshold = playbackProfile === "instant" ? 0.55 : playbackProfile === "data-saver" ? 0.9 : 0.75;
     const pct = progress / duration;
-    if (pct < 0.75 || pct > 0.98) return; // trigger window: 75–98%
+    if (pct < lowerThreshold || pct > 0.98) return;
 
     const nextIdx = queueIndexRef.current + 1;
     const q = queueRef.current;
@@ -1183,7 +1434,7 @@ export const PlayerProvider = ({ children }) => {
     if (!nextTrack || preResolvedRef.current.trackId === nextTrack.id) return;
 
     preResolveStream(nextTrack);
-  }, [progress, duration, isPlaying, preResolveStream]);
+  }, [playbackProfile, progress, duration, isPlaying, preResolveStream]);
 
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
@@ -1199,7 +1450,7 @@ export const PlayerProvider = ({ children }) => {
           persistResolvedTrack(refreshedTrack);
         })
         .catch(() => {});
-    }, REMOTE_STREAM_RECHECK_MS);
+    }, CACHE_PROMOTION_RECHECK_MS);
 
     return () => clearTimeout(timer);
   }, [currentTrack, isPlaying, persistResolvedTrack, resolvePlayableTrack]);
@@ -1221,13 +1472,24 @@ export const PlayerProvider = ({ children }) => {
         return;
       }
 
-      const offset = queueIndex;
-      const queueWindow = queue.slice(offset, offset + 4);
-      const preparedTracks = await Promise.all(queueWindow.map(async (item) => {
+      const windowStart = Math.max(queueIndex - 1, 0);
+      const windowEnd = Math.min(queue.length, queueIndex + 4);
+      const queueWindow = queue.slice(windowStart, windowEnd);
+      const currentIndex = queueIndex - windowStart;
+      const preparedTracks = await Promise.all(queueWindow.map(async (item, index) => {
+        const absoluteIndex = windowStart + index;
+        const cachedItem = absoluteIndex === queueIndex && currentTrackRef.current?.id === item.id
+          ? getResolvedTrackFromCache(currentTrackRef.current)
+          : getResolvedTrackFromCache(item);
+
+        if (cachedItem?.streamUrl) {
+          return cachedItem;
+        }
+
         try {
-          return await resolvePlayableTrack(item, { record: false, reason: 'native-queue' });
+          return await resolvePlayableTrack(cachedItem, { record: false, reason: 'native-queue' });
         } catch {
-          return item;
+          return cachedItem;
         }
       }));
 
@@ -1237,7 +1499,9 @@ export const PlayerProvider = ({ children }) => {
         if (item?.streamUrl) persistResolvedTrack(item);
       });
 
-      const nativeQueue = preparedTracks.map((item) => ({
+      const nativeQueue = preparedTracks.map((item, index) => ({
+        id: item.id || '',
+        index: windowStart + index,
         url: item.streamUrl || '',
         title: item.title || 'Unknown',
         artist: item.artist || 'Unknown',
@@ -1245,7 +1509,7 @@ export const PlayerProvider = ({ children }) => {
       }));
 
       try {
-        await MusicPlayer.setQueue({ tracks: nativeQueue, currentIndex: 0, offset });
+        await MusicPlayer.setQueue({ tracks: nativeQueue, currentIndex, offset: windowStart });
       } catch {
         // ignore
       }
@@ -1256,7 +1520,7 @@ export const PlayerProvider = ({ children }) => {
     return () => {
       cancelled = true;
     };
-  }, [queue, queueIndex, persistResolvedTrack, resolvePlayableTrack]);
+  }, [getResolvedTrackFromCache, queue, queueIndex, persistResolvedTrack, resolvePlayableTrack]);
 
   /* -------------------------- CONTEXT VALUE -------------------------- */
 
@@ -1280,7 +1544,10 @@ export const PlayerProvider = ({ children }) => {
     playbackError,
 
     autoRadioEnabled,
+    playbackProfile,
+    offlineOnlyMode,
     sleepTimerMinutes,
+    resumeState,
     equalizerState,
     reliabilityDebug,
 
@@ -1294,11 +1561,16 @@ export const PlayerProvider = ({ children }) => {
     toggleShuffle,
     cycleRepeat,
     toggleAutoRadio,
+    setPlaybackProfile,
+    cyclePlaybackProfile,
+    toggleOfflineOnlyMode,
     getRecommendationsFor,
     refreshEqualizerState,
     setEqualizerEnabled,
     setEqualizerPreset,
     clearReliabilityEvents,
+    resumePlayback,
+    clearResumeState,
 
     cycleSleepTimer,
     setQueue,

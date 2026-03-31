@@ -1,13 +1,11 @@
 import axios from 'axios';
 import { friendlyErrorMessage, logError } from '../utils/logger';
 
-import { API_BASE } from './apiBase';
-
-const YT_API_BASE = `${API_BASE}/yt`;
+import { buildApiUrl } from './apiBase';
 
 const requestYoutube = async (tag, path, config, fallbackMessage) => {
   try {
-    const response = await axios.get(`${YT_API_BASE}${path}`, config);
+    const response = await axios.get(buildApiUrl(`/yt${path}`), config);
     return { ok: true, response, error: null };
   } catch (error) {
     logError(tag, error, { path, params: config?.params });
@@ -67,7 +65,7 @@ export const youtubeApi = {
   // preferDirect=true is best for native (ExoPlayer) because it avoids proxy/streaming edge-cases.
   // Do NOT fall back to /pipe on native; if /stream fails, the caller should use Saavn fallback or show error.
   getStreamDetails: async (videoId, { preferDirect = false } = {}) => {
-    const pipeUrl = `${YT_API_BASE}/pipe/${videoId}`;
+    const pipeUrl = buildApiUrl(`/yt/pipe/${videoId}`);
 
     if (!preferDirect) {
       return { videoId, streamUrl: pipeUrl, pipeUrl, directUrl: null, cacheState: 'pipe', cached: false, streamSource: 'pipe-proxy' };

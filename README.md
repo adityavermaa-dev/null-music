@@ -7,8 +7,12 @@ Aura Music is an Android-first music player built with React, Vite, Capacitor, a
 - Background playback with lockscreen and notification controls
 - Faster replay and skip behavior with resolved stream reuse
 - Android home-screen widget and native equalizer presets
+- Email login/signup plus phone OTP auth
+- Synced likes, playlists, and recent listening per account
 - Song radio and personalized recommendation fallbacks
 - Offline downloads with in-app download management
+- Continue listening, playback quality profiles, offline-only mode, and smart downloads
+- Playlist rename/delete/reorder controls and library import/export
 - Synced lyrics support when timed lyrics are available
 - Local fallback mixes built from downloads, favorites, and recent plays
 
@@ -78,7 +82,10 @@ Production-safe defaults live in `.env.production.example`.
 Important environment variables:
 
 - `VITE_API_BASE`: frontend API base URL
+- `VITE_PHONE_OTP_ENABLED`: optional UI kill-switch for the OTP flow
 - `RECO_API_KEY`: protects recommendation endpoints in production
+- `AUTH_TOKEN_SECRET`: signs login sessions for account sync
+- `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_VERIFY_SERVICE_SID`: required for phone OTP verification
 - `REDIS_URL`: optional Redis cache for production reliability
 - `YT_DLP_BIN`: path to `yt-dlp`
 - `YT_COOKIES_FILE`: optional absolute path to a local cookies export kept outside the repo
@@ -87,6 +94,8 @@ Important environment variables:
 
 - Put the backend behind HTTPS and set `TRUST_PROXY` correctly.
 - Keep cookies files, API keys, and signing materials out of Git.
+- Set `AUTH_TOKEN_SECRET` explicitly before shipping public builds.
+- Configure Twilio Verify before enabling phone OTP in production.
 - Add Redis for cache durability across restarts.
 - Test real-device behavior for weak network, offline playback, queue advance, and download recovery.
 - Create signed Android release builds before distribution.
