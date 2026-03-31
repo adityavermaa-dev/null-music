@@ -32,6 +32,7 @@ export function buildYtdlpArgs(videoId, options = {}) {
     sourceAddress = process.env.YT_SOURCE_ADDRESS,
     playerClient = process.env.YT_PLAYER_CLIENTS || 'android_vr',
     cookiesFile = process.env.YT_COOKIES_FILE,
+    jsRuntimes = process.env.YT_DLP_JS_RUNTIMES || 'node',
     getUrl = false,
     outputToStdout = false,
   } = options;
@@ -41,6 +42,7 @@ export function buildYtdlpArgs(videoId, options = {}) {
 
   // Optional explicit cookies file (helps with sign-in / age-gated videos).
   if (cookiesFile) args.push('--cookies', cookiesFile);
+  if (jsRuntimes) args.push('--js-runtimes', jsRuntimes);
 
   // Basic headers help reduce bot-gating, without requiring cookies.
   // (Do NOT add cookies here.)
