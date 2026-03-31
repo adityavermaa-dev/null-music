@@ -33,6 +33,10 @@ export async function soundcloudGetAudioUrl(videoId, title, artist) {
     if (!query) return null;
 
     try {
+        // Fix for play-dl not automatically initializing the SoundCloud client_id
+        const clientId = await play.getFreeClientID();
+        if (clientId) await play.setToken({ soundcloud: { client_id: clientId } });
+
         // Search SoundCloud for top 5 tracks
         const results = await play.search(query, {
             source: { soundcloud: 'tracks' },

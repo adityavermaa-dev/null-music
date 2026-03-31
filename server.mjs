@@ -1112,7 +1112,7 @@ app.get("/api/yt/health/extract", async (req, res) => {
     const cookiesFile = process.env.YT_COOKIES_FILE || "";
     const args = buildYtdlpArgs(videoId, {
         getUrl: true,
-        playerClient: "mediaconnect",
+        playerClient: "mweb",
         extractorArgs: YT_EXTRACTOR_ARGS,
         sourceAddress: YT_SOURCE_ADDRESS,
         jsRuntimes: YT_DLP_JS_RUNTIMES,
