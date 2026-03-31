@@ -178,7 +178,6 @@ export const PlayerProvider = ({ children }) => {
   const playSeqRef = useRef(0);
   const nativeQueueSyncSeqRef = useRef(0);
   const resolvedTrackMapRef = useRef(new Map());
-  const playbackRecoveryTimeoutRef = useRef(null);
   const resumeSeekRef = useRef(null);
 
   /* ── Gapless playback: pre-resolve next track URL ── */
@@ -208,46 +207,7 @@ export const PlayerProvider = ({ children }) => {
     }));
   }, []);
 
-  const clearPlaybackRecovery = useCallback(() => {
-    if (playbackRecoveryTimeoutRef.current) {
-      clearTimeout(playbackRecoveryTimeoutRef.current);
-      playbackRecoveryTimeoutRef.current = null;
-    }
-  }, []);
-
-  const schedulePlaybackRecovery = useCallback((failedTrackId) => {
-    clearPlaybackRecovery();
-
-    playbackRecoveryTimeoutRef.current = setTimeout(() => {
-      playbackRecoveryTimeoutRef.current = null;
-
-      if (isLoadingRef.current || isPlayingRef.current) {
-        return;
-      }
-
-      const queueSnapshot = queueRef.current;
-      const activeIndex = queueIndexRef.current;
-      const indexedTrack =
-        activeIndex >= 0 && activeIndex < queueSnapshot.length
-          ? queueSnapshot[activeIndex]
-          : null;
-      const activeTrack = indexedTrack || currentTrackRef.current;
-      const activeTrackId = activeTrack?.id || null;
-      const hasAnotherTrack = Array.isArray(queueSnapshot) && queueSnapshot.some((item, index) => (
-        index !== activeIndex && item?.id && item.id !== failedTrackId
-      ));
-
-      if (failedTrackId && activeTrackId && activeTrackId !== failedTrackId) {
-        return;
-      }
-
-      if (!hasAnotherTrack && !autoRadioEnabledRef.current && repeatModeRef.current !== 'all') {
-        return;
-      }
-
-      skipNextRef.current?.();
-    }, PLAYBACK_ERROR_RECOVERY_DELAY_MS);
-  }, [clearPlaybackRecovery]);
+  const clearPlaybackRecovery = useCallback(() => {}, []);
 
   const getRecommendationSnapshot = useCallback(async () => {
     const userId = getOrCreateUserId();
@@ -605,7 +565,6 @@ export const PlayerProvider = ({ children }) => {
         title: track.title,
         message: error?.message || 'Song not available',
       });
-      schedulePlaybackRecovery(track.id);
 
     } finally {
 
@@ -620,8 +579,7 @@ export const PlayerProvider = ({ children }) => {
     mergeResolvedTrack,
     persistResolvedTrack,
     recordReliabilityEvent,
-    resolvePlayableTrack,
-    schedulePlaybackRecovery
+    resolvePlayableTrack
   ]);
 
   /* -------------------------- PLAY SESSION -------------------------- */
@@ -1287,7 +1245,6 @@ export const PlayerProvider = ({ children }) => {
             title: activeTrack?.title || 'Unknown',
             message: msg || 'Song not available',
           });
-          schedulePlaybackRecovery(activeTrack?.id || null);
         });
 
         // Sync state when native background player auto-plays next track
@@ -1316,7 +1273,7 @@ export const PlayerProvider = ({ children }) => {
       errorListener?.remove?.();
       queueIndexListener?.remove?.();
     };
-  }, [clearPlaybackRecovery, getResolvedTrackFromCache, recordReliabilityEvent, schedulePlaybackRecovery]);
+  }, [clearPlaybackRecovery, getResolvedTrackFromCache, recordReliabilityEvent]);
 
   /* -------------------------- PRE-FETCH RECOMMENDATIONS -------------------------- */
 

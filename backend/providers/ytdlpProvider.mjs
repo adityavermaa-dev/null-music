@@ -88,13 +88,25 @@ export async function ytdlpGetUrl(bin, videoId, options = {}) {
   // Treat login/cookie-required content as unplayable without cookies.
   // Return null (non-retryable) so higher-level retry logic doesn't keep hammering.
   if (isNonRetryableYtdlpError(err)) {
-    logger.warn('provider.ytdlp', 'yt-dlp requires sign-in/cookies (skipping)', { videoId, code });
+    logger.warn('provider.ytdlp', 'yt-dlp requires sign-in/cookies (skipping)', {
+      videoId,
+      code,
+      playerClient: options?.playerClient || process.env.YT_PLAYER_CLIENTS || 'android_vr',
+      hasCookies: Boolean(process.env.YT_COOKIES_FILE),
+      stderr: err.slice(0, 300),
+    });
     return null;
   }
 
   const url = out.trim().split(/\r?\n/)[0]?.trim();
   if (!url) {
-    logger.warn('provider.ytdlp', 'yt-dlp returned no URL', { videoId, code, stderr: err.slice(0, 300) });
+    logger.warn('provider.ytdlp', 'yt-dlp returned no URL', {
+      videoId,
+      code,
+      playerClient: options?.playerClient || process.env.YT_PLAYER_CLIENTS || 'android_vr',
+      hasCookies: Boolean(process.env.YT_COOKIES_FILE),
+      stderr: err.slice(0, 300),
+    });
     return null;
   }
 
