@@ -1,5 +1,26 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { logger } from '../lib/logger.mjs';
 import { spawnWithTimeout } from '../lib/spawnWithTimeout.mjs';
+
+function splitCsv(value) {
+  return String(value || '')
+    .split(',')
+    .map((v) => v.trim())
+    .filter(Boolean);
+}
+
+function getBundledBgutilPluginDir() {
+  try {
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = path.dirname(__filename);
+    const pluginDir = path.resolve(__dirname, '../../bgutil-ytdlp-pot-provider/plugin');
+    return fs.existsSync(pluginDir) ? pluginDir : null;
+  } catch {
+    return null;
+  }
+}
 
 export function getYtdlpProxy() {
   return String(
@@ -44,12 +65,23 @@ export function buildYtdlpArgs(videoId, options = {}) {
     cookiesFile = process.env.YT_COOKIES_FILE,
     jsRuntimes = process.env.YT_DLP_JS_RUNTIMES || 'node',
     proxy = getYtdlpProxy(),
+    pluginDirs = process.env.YT_DLP_PLUGIN_DIRS || process.env.YTDLP_PLUGIN_DIRS || '',
+    enableBundledBgutilPlugin = process.env.YT_DLP_ENABLE_BGUTIL_PLUGIN,
     getUrl = false,
     outputToStdout = false,
   } = options;
 
   // Important: avoid reading machine/user-level yt-dlp config (it can force cookies).
   const args = ['--ignore-config', '-f', 'bestaudio', '--no-playlist'];
+
+  // Optional plugin dirs (e.g., bundled PO token provider).
+  for (const pluginDir of splitCsv(pluginDirs)) {
+    args.push('--plugin-dirs', pluginDir);
+  }
+
+  const allowBundled = String(enableBundledBgutilPlugin || '').trim().toLowerCase() !== 'false';
+  const bundledBgutil = allowBundled ? getBundledBgutilPluginDir() : null;
+  if (bundledBgutil) args.push('--plugin-dirs', bundledBgutil);
 
   // Optional explicit cookies file (helps with sign-in / age-gated videos).
   if (cookiesFile) args.push('--cookies', cookiesFile);
@@ -60,11 +92,19 @@ export function buildYtdlpArgs(videoId, options = {}) {
   args.push('--add-header', 'User-Agent: com.google.android.youtube/19.09.37 (Linux; Android 13)');
   args.push('--add-header', 'Accept-Language: en-US,en;q=0.9');
 
-  // Prefer mweb with webpage/config skipping for modern yt-dlp + PO token setups.
+  // Prefer mweb with webpage/config skipping to reduce 429s on datacenter IPs.
   const skipWebpage = process.env.YT_PLAYER_SKIP || 'webpage,configs';
+  const fetchPot = String(process.env.YT_FETCH_POT || 'auto').trim();
   const extractorParts = [`player_client=${playerClient}`];
   if (skipWebpage) extractorParts.push(`player_skip=${skipWebpage}`);
+  if (fetchPot) extractorParts.push(`fetch_pot=${fetchPot}`);
   args.push('--extractor-args', `youtube:${extractorParts.join(';')}`);
+
+  // Optional override for bgutil POT provider base URL
+  const bgutilBaseUrl = String(process.env.YT_POT_PROVIDER_URL || process.env.YT_BGUTIL_BASE_URL || '').trim();
+  if (bgutilBaseUrl) {
+    args.push('--extractor-args', `youtubepot-bgutilhttp:base_url=${bgutilBaseUrl}`);
+  }
   
   if (extractorArgs) args.push('--extractor-args', extractorArgs);
 
@@ -87,7 +127,10 @@ function isNonRetryableYtdlpError(stderr = '') {
     msg.includes('confirm your age') ||
     msg.includes('please sign in') ||
     msg.includes('account has been terminated') ||
-    msg.includes('private video')
+    msg.includes('private video') ||
+    // Typical for embeds / restricted playback contexts
+    msg.includes('watch video on youtube') ||
+    msg.includes('error code: 152')
   );
 }
 
@@ -102,10 +145,9 @@ export async function ytdlpGetUrl(bin, videoId, options = {}) {
   const { out, err } = await collectStdout(proc);
   const { code } = await done;
 
-  // Treat login/cookie-required content as unplayable without cookies.
-  // Return null (non-retryable) so higher-level retry logic doesn't keep hammering.
+  // Treat known non-retryable failures as unplayable so higher-level logic doesn't hammer.
   if (isNonRetryableYtdlpError(err)) {
-    logger.warn('provider.ytdlp', 'yt-dlp requires sign-in/cookies (skipping)', {
+    logger.warn('provider.ytdlp', 'yt-dlp returned non-retryable error (skipping)', {
       videoId,
       code,
       playerClient: options?.playerClient || process.env.YT_PLAYER_CLIENTS || 'mweb',

@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { spawn } from 'child_process';
+import { fileURLToPath } from 'url';
 import { logger } from '../lib/logger.mjs';
 import { getYtdlpProxy } from '../providers/ytdlpProvider.mjs';
 
@@ -12,6 +13,24 @@ const LOCK_SUFFIX = '.lock';
 
 if (!fs.existsSync(CACHE_DIR)) {
     fs.mkdirSync(CACHE_DIR, { recursive: true });
+}
+
+function splitCsv(value) {
+    return String(value || '')
+        .split(',')
+        .map((v) => v.trim())
+        .filter(Boolean);
+}
+
+function getBundledBgutilPluginDir() {
+    try {
+        const __filename = fileURLToPath(import.meta.url);
+        const __dirname = path.dirname(__filename);
+        const pluginDir = path.resolve(__dirname, '../../bgutil-ytdlp-pot-provider/plugin');
+        return fs.existsSync(pluginDir) ? pluginDir : null;
+    } catch {
+        return null;
+    }
 }
 
 function lockPath(videoId) {
@@ -138,6 +157,15 @@ export function downloadToCache(videoId, ytdlpBin) {
         '--no-warnings',
     ];
 
+    // Optional plugin dirs (e.g. bundled PO token provider)
+    const pluginDirs = process.env.YT_DLP_PLUGIN_DIRS || process.env.YTDLP_PLUGIN_DIRS || '';
+    for (const pluginDir of splitCsv(pluginDirs)) {
+        args.push('--plugin-dirs', pluginDir);
+    }
+    const allowBundled = String(process.env.YT_DLP_ENABLE_BGUTIL_PLUGIN || '').trim().toLowerCase() !== 'false';
+    const bundledBgutil = allowBundled ? getBundledBgutilPluginDir() : null;
+    if (bundledBgutil) args.push('--plugin-dirs', bundledBgutil);
+
     if (process.env.YT_COOKIES_FILE) {
         args.push('--cookies', process.env.YT_COOKIES_FILE);
     }
@@ -156,9 +184,16 @@ export function downloadToCache(videoId, ytdlpBin) {
 
     const playerClient = process.env.YT_PLAYER_CLIENTS || 'mweb';
     const skipWebpage = process.env.YT_PLAYER_SKIP || 'webpage,configs';
+    const fetchPot = String(process.env.YT_FETCH_POT || 'auto').trim();
     const extractorParts = [`player_client=${playerClient}`];
     if (skipWebpage) extractorParts.push(`player_skip=${skipWebpage}`);
+    if (fetchPot) extractorParts.push(`fetch_pot=${fetchPot}`);
     args.push('--extractor-args', `youtube:${extractorParts.join(';')}`);
+
+    const bgutilBaseUrl = String(process.env.YT_POT_PROVIDER_URL || process.env.YT_BGUTIL_BASE_URL || '').trim();
+    if (bgutilBaseUrl) {
+        args.push('--extractor-args', `youtubepot-bgutilhttp:base_url=${bgutilBaseUrl}`);
+    }
 
     if (process.env.YT_EXTRACTOR_ARGS) {
         args.push('--extractor-args', process.env.YT_EXTRACTOR_ARGS);
