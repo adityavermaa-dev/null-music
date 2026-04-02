@@ -30,6 +30,51 @@ const YTDLP_CB_THRESHOLD = Math.max(1, Number(process.env.YTDLP_CB_THRESHOLD || 
 const YTDLP_CB_COOLDOWN_MS = Math.max(5_000, Number(process.env.YTDLP_CB_COOLDOWN_MS || 60_000));
 let ytdlpCircuitOpenedAt = 0;
 
+function isQueueTimeoutError(error) {
+  const message = String(error?.message || '').toLowerCase();
+  return message.includes('task timed out');
+}
+
+async function resolveProvider(name, provider, { timeoutMs, videoId, metric, validate = true }) {
+  logger.info('resolver', `${name} fallback started`, { videoId });
+
+  try {
+    const url = await withTimeout(
+      retry(provider, 1, {
+        delayMs: 0,
+        onError: (err) => logger.warn('resolver', `${name} attempt failed`, {
+          videoId,
+          error: err?.message,
+        }),
+      }),
+      timeoutMs
+    );
+
+    if (!url) {
+      logger.info('resolver', `${name} returned no stream`, { videoId });
+      return null;
+    }
+
+    if (validate) {
+      const ok = await withTimeout(isStreamAlive(url), VALIDATION_TIMEOUT_MS).catch(() => false);
+      if (!ok) {
+        logger.warn('resolver', `${name} returned an invalid stream URL`, { videoId });
+        return null;
+      }
+    }
+
+    logger.info('resolver', `${name} fallback resolved stream`, { videoId });
+    if (metric) metrics.increment(metric);
+    return { url, source: name };
+  } catch (error) {
+    logger.warn('resolver', `${name} fallback failed`, {
+      videoId,
+      error: error?.message,
+    });
+    return null;
+  }
+}
+
 function streamKey(videoId) {
   return `${CACHE_NAMESPACE}:stream:${videoId}`;
 }
@@ -99,6 +144,13 @@ async function resolveStreamWithMetaInternal({
         if (ytdlpFailureCount > YTDLP_CB_THRESHOLD && !ytdlpCircuitOpenedAt) {
           ytdlpCircuitOpenedAt = Date.now();
         }
+        if (isQueueTimeoutError(error)) {
+          logger.warn('resolver', 'yt-dlp queue timeout; continuing to fallback providers', {
+            videoId,
+            error: error?.message,
+          });
+          return null;
+        }
         throw error;
       }
     };
@@ -128,15 +180,22 @@ async function resolveStreamWithMetaInternal({
     let resolved = null;
 
     try {
-        const url = await withTimeout(
-          retry(primary, 2, {
-            delayMs: 150,
-            onError: (err) => logger.warn('resolver', 'yt-dlp attempt failed', { videoId, error: err?.message }),
-          }),
-          FALLBACK_TIMEOUT_MS
-        );
-        if (url) resolved = { url, source: 'yt-dlp' };
-      } catch {
+      const url = await withTimeout(
+        retry(primary, 2, {
+          delayMs: 150,
+          onError: (err) => logger.warn('resolver', 'yt-dlp attempt failed', { videoId, error: err?.message }),
+        }),
+        FALLBACK_TIMEOUT_MS
+      );
+      if (url) {
+        const ok = await withTimeout(isStreamAlive(url), VALIDATION_TIMEOUT_MS).catch(() => false);
+        if (ok) {
+          resolved = { url, source: 'yt-dlp' };
+        } else {
+          logger.warn('resolver', 'yt-dlp produced an invalid stream after resolution', { videoId });
+        }
+      }
+    } catch {
       // ignore
     }
 
@@ -146,8 +205,18 @@ async function resolveStreamWithMetaInternal({
 
     const fallbacks = [
       {
-        name: 'ytdl-core',
+        name: 'saavn',
         metric: 'resolver.secondary.success',
+        fn: saavnFallback,
+      },
+      {
+        name: 'soundcloud',
+        metric: 'resolver.fallback.used',
+        fn: soundcloudFallback,
+      },
+      {
+        name: 'ytdl-core',
+        metric: 'resolver.fallback.used',
         fn: ytdlCoreFallback,
       },
       {
@@ -160,38 +229,15 @@ async function resolveStreamWithMetaInternal({
         metric: 'resolver.fallback.used',
         fn: invidiousFallback,
       },
-      {
-        name: 'saavn',
-        metric: 'resolver.fallback.used',
-        fn: saavnFallback,
-      },
-      {
-        name: 'soundcloud',
-        metric: 'resolver.fallback.used',
-        fn: soundcloudFallback,
-      },
     ];
 
     for (const fallback of fallbacks) {
       if (resolved?.url) break;
-      try {
-        const url = await withTimeout(
-          retry(fallback.fn, 1, {
-            delayMs: 0,
-            onError: (err) => logger.warn('resolver', `${fallback.name} attempt failed`, {
-              videoId,
-              error: err?.message,
-            }),
-          }),
-          PRIMARY_TIMEOUT_MS
-        );
-        if (url) {
-          resolved = { url, source: fallback.name };
-          metrics.increment(fallback.metric);
-        }
-      } catch {
-        // ignore and continue to the next provider
-      }
+      resolved = await resolveProvider(fallback.name, fallback.fn, {
+        timeoutMs: PRIMARY_TIMEOUT_MS,
+        videoId,
+        metric: fallback.metric,
+      });
     }
 
     if (!resolved?.url) {
