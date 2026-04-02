@@ -12,6 +12,7 @@ import React, {
 import { Capacitor } from '@capacitor/core';
 
 import { nativeMediaApi } from "../api/nativeMedia";
+import { buildApiUrl } from "../api/apiBase";
 import { youtubeApi } from "../api/youtube";
 import { recommendationsApi } from "../api/recommendations";
 import { getOrCreateUserId } from "../utils/userId";
@@ -1370,11 +1371,19 @@ export const PlayerProvider = ({ children }) => {
           return cachedItem;
         }
 
-        try {
-          return await resolvePlayableTrack(cachedItem, { record: false, reason: 'native-queue' });
-        } catch {
-          return cachedItem;
+        if (cachedItem?.source === 'youtube') {
+          const videoId = cachedItem.videoId || String(cachedItem.id || '').replace(/^yt-/, '');
+          if (videoId) {
+            return mergeResolvedTrack(cachedItem, {
+              streamUrl: buildApiUrl(`/yt/pipe/${videoId}`),
+              streamSource: 'pipe-proxy',
+              cacheState: 'pipe',
+              streamResolvedAt: Date.now(),
+            });
+          }
         }
+
+        return cachedItem;
       }));
 
       if (cancelled || syncSeq !== nativeQueueSyncSeqRef.current) return;
@@ -1404,7 +1413,7 @@ export const PlayerProvider = ({ children }) => {
     return () => {
       cancelled = true;
     };
-  }, [getResolvedTrackFromCache, queue, queueIndex, persistResolvedTrack, resolvePlayableTrack]);
+  }, [getResolvedTrackFromCache, mergeResolvedTrack, queue, queueIndex, persistResolvedTrack]);
 
   /* -------------------------- CONTEXT VALUE -------------------------- */
 

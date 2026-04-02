@@ -30,6 +30,7 @@ import { downloadToCache, getCachedFilePath, getCacheStatus } from "./backend/ca
 import { ytdlpQueue } from "./backend/queue/ytdlpQueue.mjs";
 import { buildYtdlpArgs, getYtdlpProxy } from "./backend/providers/ytdlpProvider.mjs";
 import { spawnWithTimeout } from "./backend/lib/spawnWithTimeout.mjs";
+import { withTimeout } from "./backend/lib/withTimeout.mjs";
 import { logger } from "./backend/lib/logger.mjs";
 import { metrics } from "./backend/lib/metrics.mjs";
 import { getRecommendations, trackUserAction } from "./backend/reco/recommendations.mjs";
@@ -94,6 +95,7 @@ const YT_EXTRACTOR_ARGS = process.env.YT_EXTRACTOR_ARGS || "";
 const YT_DLP_JS_RUNTIMES = process.env.YT_DLP_JS_RUNTIMES || "node";
 const YT_DLP_PROXY = getYtdlpProxy();
 const YT_PLAYER_SKIP = process.env.YT_PLAYER_SKIP || "webpage,configs";
+const STREAM_DIRECT_RESOLVE_TIMEOUT_MS = Math.max(1000, Number(process.env.STREAM_DIRECT_RESOLVE_TIMEOUT_MS || 5000));
 
 const RECO_API_KEY = process.env.RECO_API_KEY || "";
 
@@ -544,14 +546,17 @@ app.get("/api/yt/stream/:videoId", async (req, res) => {
         } else {
             try {
                 // Not cached locally yet. Resolve direct URL for instant playback...
-                const resolved = await resolveStreamWithMeta({
-                    innertube,
-                    ytdlpBin: YT_DLP_BIN,
-                    cache,
-                    videoId,
-                    title,
-                    artist: author
-                });
+                const resolved = await withTimeout(
+                    resolveStreamWithMeta({
+                        innertube,
+                        ytdlpBin: YT_DLP_BIN,
+                        cache,
+                        videoId,
+                        title,
+                        artist: author
+                    }),
+                    STREAM_DIRECT_RESOLVE_TIMEOUT_MS
+                );
                 streamUrl = resolved?.url || null;
                 responseDataStreamSource = resolved?.source || null;
             } catch (resolveError) {
