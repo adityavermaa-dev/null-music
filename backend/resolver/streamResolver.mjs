@@ -16,9 +16,10 @@ const TTL_SECONDS = Math.max(60, Number(process.env.STREAM_CACHE_TTL_SECONDS || 
 const CACHE_NAMESPACE = (process.env.CACHE_NAMESPACE || 'aura').trim() || 'aura';
 const VALIDATION_TIMEOUT_MS = Math.max(500, Number(process.env.STREAM_VALIDATE_TIMEOUT_MS || 4000));
 const PRIMARY_TIMEOUT_MS = Math.max(500, Number(process.env.PRIMARY_TIMEOUT_MS || 8000));
+const QUICK_FALLBACK_TIMEOUT_MS = Math.max(500, Number(process.env.QUICK_FALLBACK_TIMEOUT_MS || 2500));
 const FALLBACK_TIMEOUT_MS = Math.max(
   500,
-  Number(process.env.YTDLP_TIMEOUT_MS || process.env.YTDLP_TIMEOUT || 8000)
+  Number(process.env.YTDLP_TIMEOUT_MS || process.env.YTDLP_TIMEOUT || 20000)
 );
 const YTDLP_CLIENTS = String(process.env.YT_DLP_FALLBACK_CLIENTS || 'tv,mweb,web_embedded')
   .split(',')
@@ -208,33 +209,38 @@ async function resolveStreamWithMetaInternal({
         name: 'saavn',
         metric: 'resolver.secondary.success',
         fn: saavnFallback,
+        timeoutMs: PRIMARY_TIMEOUT_MS,
       },
       {
         name: 'soundcloud',
         metric: 'resolver.fallback.used',
         fn: soundcloudFallback,
+        timeoutMs: PRIMARY_TIMEOUT_MS,
       },
       {
         name: 'ytdl-core',
         metric: 'resolver.fallback.used',
         fn: ytdlCoreFallback,
+        timeoutMs: PRIMARY_TIMEOUT_MS,
       },
       {
         name: 'piped',
         metric: 'resolver.fallback.used',
         fn: pipedFallback,
+        timeoutMs: QUICK_FALLBACK_TIMEOUT_MS,
       },
       {
         name: 'invidious',
         metric: 'resolver.fallback.used',
         fn: invidiousFallback,
+        timeoutMs: QUICK_FALLBACK_TIMEOUT_MS,
       },
     ];
 
     for (const fallback of fallbacks) {
       if (resolved?.url) break;
       resolved = await resolveProvider(fallback.name, fallback.fn, {
-        timeoutMs: PRIMARY_TIMEOUT_MS,
+        timeoutMs: fallback.timeoutMs || PRIMARY_TIMEOUT_MS,
         videoId,
         metric: fallback.metric,
       });

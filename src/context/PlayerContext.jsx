@@ -1293,13 +1293,14 @@ export const PlayerProvider = ({ children }) => {
   }, [queueIndex, queue, autoRadioEnabled, currentTrack, fetchRecommendations]);
 
   useEffect(() => {
-    if (playbackProfile === "data-saver") return;
+    if (playbackProfile !== "instant") return;
+    if (isLoading) return;
     if (!queue.length || queueIndex < 0) return;
     const nextTrack = queue[queueIndex + 1];
     if (nextTrack) {
       preResolveStream(nextTrack);
     }
-  }, [playbackProfile, queue, queueIndex, preResolveStream]);
+  }, [isLoading, playbackProfile, queue, queueIndex, preResolveStream]);
 
   /* ----------- GAPLESS: Pre-resolve next track URL at 75% progress ----------- */
 

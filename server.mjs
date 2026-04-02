@@ -522,6 +522,7 @@ app.get("/api/yt/stream/:videoId", async (req, res) => {
     try {
         const innertube = await getYT();
         const cache = await cachePromise;
+        const pipeUrl = `${req.protocol}://${req.get('host')}/api/yt/pipe/${videoId}`;
 
         let title, author, duration, thumbnail;
         try {
@@ -541,19 +542,28 @@ app.get("/api/yt/stream/:videoId", async (req, res) => {
             streamUrl = `${req.protocol}://${req.get('host')}/api/yt/cache/${videoId}`;
             logger.info("stream", "Serving from local disk cache", { videoId });
         } else {
-            // Not cached locally yet. Resolve direct URL for instant playback...
-            const resolved = await resolveStreamWithMeta({
-                innertube,
-                ytdlpBin: YT_DLP_BIN,
-                cache,
-                videoId,
-                title,
-                artist: author
-            });
-            streamUrl = resolved?.url || null;
+            try {
+                // Not cached locally yet. Resolve direct URL for instant playback...
+                const resolved = await resolveStreamWithMeta({
+                    innertube,
+                    ytdlpBin: YT_DLP_BIN,
+                    cache,
+                    videoId,
+                    title,
+                    artist: author
+                });
+                streamUrl = resolved?.url || null;
+                responseDataStreamSource = resolved?.source || null;
+            } catch (resolveError) {
+                logger.warn("stream", "Falling back to pipe proxy after resolver failure", {
+                    videoId,
+                    error: resolveError?.message,
+                });
+                streamUrl = pipeUrl;
+                responseDataStreamSource = "pipe-proxy";
+            }
             // ...and spawn the background downloader for next time!
             downloadToCache(videoId, YT_DLP_BIN);
-            responseDataStreamSource = resolved?.source || null;
         }
 
         const responseData = {
@@ -572,7 +582,16 @@ app.get("/api/yt/stream/:videoId", async (req, res) => {
         res.json(responseData);
     } catch (err) {
         logger.error("stream", "Stream error", { videoId, error: err?.message });
-        res.status(500).json({ streamUrl: null, error: "Stream unavailable" });
+        const pipeUrl = `${req.protocol}://${req.get('host')}/api/yt/pipe/${videoId}`;
+        res.json({
+            videoId,
+            streamUrl: pipeUrl,
+            cacheState: "warming",
+            cached: false,
+            cacheSizeBytes: 0,
+            streamSource: "pipe-proxy",
+            error: "Primary stream unavailable, using pipe proxy.",
+        });
     }
 });
 
