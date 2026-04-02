@@ -25,12 +25,11 @@ import {
 import { sendEmailOtp, verifyEmailOtpCode } from "./backend/auth/emailOtp.mjs";
 import { recordTrackIssue } from "./backend/feedback/issueStore.mjs";
 
-import { resolveStreamUrl, resolveStreamWithMeta } from "./backend/resolver/streamResolver.mjs";
+import { resolveStreamUrl } from "./backend/resolver/streamResolver.mjs";
 import { downloadToCache, getCachedFilePath, getCacheStatus } from "./backend/cache/audioCache.mjs";
 import { ytdlpQueue } from "./backend/queue/ytdlpQueue.mjs";
 import { buildYtdlpArgs, getYtdlpProxy } from "./backend/providers/ytdlpProvider.mjs";
 import { spawnWithTimeout } from "./backend/lib/spawnWithTimeout.mjs";
-import { withTimeout } from "./backend/lib/withTimeout.mjs";
 import { logger } from "./backend/lib/logger.mjs";
 import { metrics } from "./backend/lib/metrics.mjs";
 import { getRecommendations, trackUserAction } from "./backend/reco/recommendations.mjs";
@@ -95,7 +94,6 @@ const YT_EXTRACTOR_ARGS = process.env.YT_EXTRACTOR_ARGS || "";
 const YT_DLP_JS_RUNTIMES = process.env.YT_DLP_JS_RUNTIMES || "node";
 const YT_DLP_PROXY = getYtdlpProxy();
 const YT_PLAYER_SKIP = process.env.YT_PLAYER_SKIP || "webpage,configs";
-const STREAM_DIRECT_RESOLVE_TIMEOUT_MS = Math.max(1000, Number(process.env.STREAM_DIRECT_RESOLVE_TIMEOUT_MS || 5000));
 
 const RECO_API_KEY = process.env.RECO_API_KEY || "";
 
@@ -523,7 +521,6 @@ app.get("/api/yt/stream/:videoId", async (req, res) => {
 
     try {
         const innertube = await getYT();
-        const cache = await cachePromise;
         const pipeUrl = `${req.protocol}://${req.get('host')}/api/yt/pipe/${videoId}`;
 
         let title, author, duration, thumbnail;
@@ -542,33 +539,14 @@ app.get("/api/yt/stream/:videoId", async (req, res) => {
         if (cacheStatus.cached) {
             // Serve from our reliable disk cache
             streamUrl = `${req.protocol}://${req.get('host')}/api/yt/cache/${videoId}`;
+            responseDataStreamSource = "disk-cache";
             logger.info("stream", "Serving from local disk cache", { videoId });
         } else {
-            try {
-                // Not cached locally yet. Resolve direct URL for instant playback...
-                const resolved = await withTimeout(
-                    resolveStreamWithMeta({
-                        innertube,
-                        ytdlpBin: YT_DLP_BIN,
-                        cache,
-                        videoId,
-                        title,
-                        artist: author
-                    }),
-                    STREAM_DIRECT_RESOLVE_TIMEOUT_MS
-                );
-                streamUrl = resolved?.url || null;
-                responseDataStreamSource = resolved?.source || null;
-            } catch (resolveError) {
-                logger.warn("stream", "Falling back to pipe proxy after resolver failure", {
-                    videoId,
-                    error: resolveError?.message,
-                });
-                streamUrl = pipeUrl;
-                responseDataStreamSource = "pipe-proxy";
-            }
-            // ...and spawn the background downloader for next time!
-            downloadToCache(videoId, YT_DLP_BIN);
+            streamUrl = pipeUrl;
+            responseDataStreamSource = "pipe-proxy";
+            logger.info("stream", cacheStatus.warming ? "Serving pipe proxy while cache warms" : "Serving pipe proxy for uncached video", {
+                videoId,
+            });
         }
 
         const responseData = {
@@ -578,10 +556,10 @@ app.get("/api/yt/stream/:videoId", async (req, res) => {
             duration,
             thumbnail,
             streamUrl,
-            cacheState: cacheStatus.cached ? "disk" : "warming",
+            cacheState: cacheStatus.cached ? "disk" : (cacheStatus.warming ? "warming" : "pipe"),
             cached: cacheStatus.cached,
             cacheSizeBytes: cacheStatus.sizeBytes || 0,
-            streamSource: cacheStatus.cached ? "disk-cache" : (typeof responseDataStreamSource === "string" ? responseDataStreamSource : "unknown"),
+            streamSource: typeof responseDataStreamSource === "string" ? responseDataStreamSource : "unknown",
         };
 
         res.json(responseData);
@@ -877,49 +855,14 @@ app.get("/api/yt/pipe/:videoId", async (req, res) => {
         return res.end();
     }
 
-    // Strategy 1: resolve a URL via resolver/cache and proxy it (fast path)
-    try {
-        const innertube = await getYT();
-        const cache = await cachePromise;
-        
-        let title, author;
-        try {
-            const info = await innertube.music.getInfo(videoId);
-            title = info.basic_info?.title;
-            author = info.basic_info?.author;
-        } catch { /* metadata is optional but used for fallback routing */ }
-
-        const freshUrl = await resolveStreamUrl({
-            innertube,
-            ytdlpBin: YT_DLP_BIN,
-            cache,
-            videoId,
-            title,
-            artist: author
-        });
-        const headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        };
-        if (req.headers.range) headers.Range = req.headers.range;
-
-        const upstreamTimeoutMs = Math.max(1000, Number(process.env.UPSTREAM_FETCH_TIMEOUT_MS || 12000));
-        const controller = new AbortController();
-        const timer = setTimeout(() => {
-            try { controller.abort(); } catch { }
-        }, upstreamTimeoutMs);
-
-        const upstream = await fetch(freshUrl, { headers, signal: controller.signal }).finally(() => {
-            clearTimeout(timer);
-        });
-
-        if (upstream.ok || upstream.status === 206) {
-            return pipeUpstream(upstream, res);
-        }
-    } catch (urlErr) {
-        logger.warn("pipe", "URL-based stream failed; falling back to yt-dlp pipe", { videoId, error: urlErr?.message });
+    const cachedPath = getCachedFilePath(videoId);
+    if (cachedPath) {
+        res.setHeader("Accept-Ranges", "bytes");
+        res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+        return res.sendFile(cachedPath);
     }
 
-    // Strategy 2: queued yt-dlp process piping (last resort; concurrency-limited)
+    // Strategy 1: queued yt-dlp process piping
     await pipeYtdlpToResponse({ req, res, videoId });
 });
 
