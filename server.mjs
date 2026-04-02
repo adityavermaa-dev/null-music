@@ -950,9 +950,9 @@ async function pipeYtdlpToResponse({ req, res, videoId, contentDisposition = "" 
         });
 
         const first = await pipeAttempt({
-            playerClient: "android",
-            format: "bestaudio[ext=m4a]/bestaudio[acodec*=mp4a]/bestaudio[ext=mp4]/bestaudio",
-            contentType: "audio/mp4",
+            playerClient: "web",
+            format: "251/250/249/140/139/bestaudio",
+            contentType: "audio/webm",
         });
         if (first.ok) {
             if (!res.writableEnded) res.end();
@@ -960,9 +960,9 @@ async function pipeYtdlpToResponse({ req, res, videoId, contentDisposition = "" 
         }
 
         const second = await pipeAttempt({
-            playerClient: "ios",
-            format: "bestaudio[ext=m4a]/bestaudio[acodec*=mp4a]/bestaudio[ext=mp4]/bestaudio",
-            contentType: "audio/mp4",
+            playerClient: "tv",
+            format: "251/250/249/140/139/bestaudio",
+            contentType: "audio/webm",
         });
         if (second.ok) {
             if (!res.writableEnded) res.end();
@@ -971,7 +971,7 @@ async function pipeYtdlpToResponse({ req, res, videoId, contentDisposition = "" 
 
         const third = await pipeAttempt({
             playerClient: "mweb",
-            format: "bestaudio[ext=webm]/bestaudio",
+            format: "251/250/249/140/139/bestaudio",
             contentType: "audio/webm",
         });
         if (third.ok) {

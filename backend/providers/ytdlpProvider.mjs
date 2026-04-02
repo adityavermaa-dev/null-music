@@ -60,9 +60,9 @@ function collectStdout(proc, limit = 64 * 1024) {
 export function buildYtdlpArgs(videoId, options = {}) {
   const {
     extractorArgs = process.env.YT_EXTRACTOR_ARGS || '',
-    format = process.env.YT_DLP_FORMAT || 'bestaudio',
+    format = process.env.YT_DLP_FORMAT || '251/250/249/140/139/best',
     sourceAddress = process.env.YT_SOURCE_ADDRESS,
-    playerClient = process.env.YT_PLAYER_CLIENTS || 'android',
+    playerClient = process.env.YT_PLAYER_CLIENTS || 'web',
     cookiesFile = process.env.YT_COOKIES_FILE,
     jsRuntimes = process.env.YT_DLP_JS_RUNTIMES || 'node',
     proxy = getYtdlpProxy(),
@@ -74,7 +74,7 @@ export function buildYtdlpArgs(videoId, options = {}) {
   } = options;
 
   // Important: avoid reading machine/user-level yt-dlp config (it can force cookies).
-  const args = ['--ignore-config', '-f', format, '--no-playlist'];
+  const args = ['--ignore-config', '-f', format, '--no-playlist', '--no-warnings'];
 
   // Optional plugin dirs (e.g., bundled PO token provider).
   for (const pluginDir of splitCsv(pluginDirs)) {
@@ -85,23 +85,28 @@ export function buildYtdlpArgs(videoId, options = {}) {
   const bundledBgutil = allowBundled ? getBundledBgutilPluginDir() : null;
   if (bundledBgutil) args.push('--plugin-dirs', bundledBgutil);
 
+  // JavaScript runtime MUST be specified for modern YouTube extraction
+  if (jsRuntimes) args.push('--js-runtimes', jsRuntimes);
+
   // Optional explicit cookies file (helps with sign-in / age-gated videos).
   if (cookiesFile) args.push('--cookies', cookiesFile);
-  if (jsRuntimes) args.push('--js-runtimes', jsRuntimes);
   if (proxy) args.push('--proxy', proxy);
 
-  // Basic headers help reduce bot-gating, without requiring cookies.
-  args.push('--add-header', 'User-Agent: com.google.android.youtube/19.09.37 (Linux; Android 13)');
+  // Basic headers to appear as a real client
+  args.push('--add-header', 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
   args.push('--add-header', 'Accept-Language: en-US,en;q=0.9');
 
-  // Prefer mweb with webpage/config skipping to reduce 429s on datacenter IPs.
-  const skipWebpage = process.env.YT_PLAYER_SKIP || 'webpage,configs';
+  // Player client configuration
+  const skipWebpage = String(process.env.YT_PLAYER_SKIP || '').trim();
   const fetchPot = String(process.env.YT_FETCH_POT || 'never').trim();
-  const extractorParts = [`player_client=${playerClient}`];
+  const extractorParts = [];
+  if (playerClient && playerClient !== 'default') extractorParts.push(`player_client=${playerClient}`);
   if (skipWebpage) extractorParts.push(`player_skip=${skipWebpage}`);
-  if (fetchPot) extractorParts.push(`fetch_pot=${fetchPot}`);
+  if (fetchPot && fetchPot !== 'never') extractorParts.push(`fetch_pot=${fetchPot}`);
   if (dataSyncId) extractorParts.push(`data_sync_id=${dataSyncId}`);
-  args.push('--extractor-args', `youtube:${extractorParts.join(';')}`);
+  if (extractorParts.length > 0) {
+    args.push('--extractor-args', `youtube:${extractorParts.join(';')}`);
+  }
 
   // Optional override for bgutil POT provider base URL
   const bgutilBaseUrl = String(process.env.YT_POT_PROVIDER_URL || process.env.YT_BGUTIL_BASE_URL || '').trim();
@@ -133,6 +138,7 @@ function isNonRetryableYtdlpError(stderr = '') {
     msg.includes('private video') ||
     msg.includes('missing required data sync id') ||
     msg.includes('unable to fetch gvs po token') ||
+    msg.includes('requested format is not available') ||
     // Typical for embeds / restricted playback contexts
     msg.includes('watch video on youtube') ||
     msg.includes('error code: 152')
