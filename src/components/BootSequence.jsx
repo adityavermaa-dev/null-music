@@ -4,30 +4,45 @@ export default function BootSequence({ children }) {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    const minimum = setTimeout(() => setReady(true), 1100);
-    const finishOnLoad = () => setReady(true);
-    window.addEventListener('load', finishOnLoad);
+    let mounted = true;
+    
+    const minimum = setTimeout(() => {
+      if (mounted) triggerReady();
+    }, 1100);
+
+    const finishOnLoad = () => {
+      if (mounted) triggerReady();
+    };
+    
+    function triggerReady() {
+      setReady(true);
+      const globalSplash = document.getElementById('global-boot-splash');
+      if (globalSplash) {
+        globalSplash.classList.add('fade-out');
+        setTimeout(() => {
+          if (globalSplash.parentNode) {
+            globalSplash.parentNode.removeChild(globalSplash);
+          }
+        }, 500); // Wait for fade-out animation to finish
+      }
+    }
+
+    if (document.readyState === 'complete') {
+      // Document is already loaded
+    } else {
+      window.addEventListener('load', finishOnLoad);
+    }
 
     return () => {
+      mounted = false;
       clearTimeout(minimum);
       window.removeEventListener('load', finishOnLoad);
     };
   }, []);
 
   return (
-    <>
-      {!ready && (
-        <div className="boot-splash" role="status" aria-live="polite">
-          <span className="boot-splash-orbit boot-splash-orbit--outer" aria-hidden="true" />
-          <span className="boot-splash-orbit boot-splash-orbit--inner" aria-hidden="true" />
-          <img src="/null-logo.svg" className="boot-splash-logo" alt="Null" />
-          <span className="boot-splash-glow" aria-hidden="true" />
-          <p className="boot-splash-label">Null</p>
-        </div>
-      )}
-      <div className={`boot-splash-app ${ready ? 'boot-splash-app--ready' : ''}`}>
-        {children}
-      </div>
-    </>
+    <div className={`boot-splash-app ${ready ? 'boot-splash-app--ready' : ''}`}>
+      {children}
+    </div>
   );
 }

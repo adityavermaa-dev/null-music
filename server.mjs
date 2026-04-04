@@ -683,6 +683,34 @@ app.get("/api/yt/suggestions", async (req, res) => {
                     suggestions.push({
                         type: "query",
                         text: item.suggestion?.text || "",
+                        title: item.suggestion?.text || "",
+                    });
+                } else if (item.type === "MusicResponsiveListItem") {
+                    const title = pickText(item.name, item.title, item.flex_columns?.[0]?.title);
+                    if (!title) continue;
+                    
+                    let type = "query";
+                    if (item.item_type === "artist") type = "artist";
+                    else if (item.item_type === "album") type = "album";
+                    else if (item.item_type === "song") type = "song";
+                    
+                    const subText = pickText(item.flex_columns?.[1]?.title);
+                    if (type === "query") {
+                        if (/song/i.test(subText)) type = "song";
+                        if (/album/i.test(subText)) type = "album";
+                        if (/artist/i.test(subText)) type = "artist";
+                        if (/video/i.test(subText)) type = "song";
+                    }
+
+                    const desc = subText || pickText(item.subtitle) || "";
+                    const thumbnail = pickThumbnailUrl(item) || "";
+
+                    suggestions.push({
+                        type,
+                        text: title,
+                        title,
+                        description: desc,
+                        image: thumbnail,
                     });
                 }
             }

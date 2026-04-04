@@ -37,8 +37,80 @@
         }
       }
     </script>
+    <style>
+      .boot-splash {
+        position: fixed; inset: 0; z-index: 9999;
+        display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+        background: radial-gradient(circle at 20% 20%, rgba(249, 115, 22, 0.18), transparent 44%),
+                    radial-gradient(circle at 80% 75%, rgba(239, 68, 68, 0.20), transparent 46%),
+                    #07080d;
+        animation: none;
+      }
+      .boot-splash.fade-out {
+        animation: bootFadeOut 0.42s ease forwards;
+      }
+      .boot-splash-orbit {
+        position: absolute; border-radius: 50%;
+        border: 1px solid rgba(255, 255, 255, 0.08); pointer-events: none;
+      }
+      .boot-splash-orbit--outer {
+        width: 220px; height: 220px; border-color: rgba(249, 115, 22, 0.25);
+        animation: bootOrbitOuter 3.6s linear infinite;
+      }
+      .boot-splash-orbit--inner {
+        width: 164px; height: 164px; border-color: rgba(239, 68, 68, 0.22);
+        animation: bootOrbitInner 2.2s linear infinite reverse;
+      }
+      .boot-splash-logo {
+        width: 112px; height: 112px;
+        filter: drop-shadow(0 12px 28px rgba(239, 68, 68, 0.28));
+        animation: bootLogoPulse 1.1s cubic-bezier(0.16, 1, 0.3, 1) both; z-index: 2;
+      }
+      .boot-splash-glow {
+        position: absolute; width: 134px; height: 134px; border-radius: 50%;
+        background: radial-gradient(circle, rgba(249, 115, 22, 0.25) 0%, rgba(239, 68, 68, 0.12) 42%, rgba(0, 0, 0, 0) 70%);
+        filter: blur(8px); animation: bootGlowPulse 1.8s ease-in-out infinite;
+      }
+      .boot-splash-label {
+        font-size: 17px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase;
+        color: #f4f5f7; animation: bootLabelIn 0.6s ease 0.16s both;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      }
+      
+      @keyframes bootLogoPulse {
+        0% { opacity: 0; transform: scale(0.74) rotate(-5deg); }
+        55% { opacity: 1; transform: scale(1.04) rotate(0deg); }
+        100% { opacity: 1; transform: scale(1); }
+      }
+      @keyframes bootLabelIn {
+        from { opacity: 0; transform: translateY(8px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      @keyframes bootFadeOut {
+        to { opacity: 0; visibility: hidden; pointer-events: none; }
+      }
+      @keyframes bootOrbitOuter {
+        from { transform: rotate(0deg) scale(0.98); opacity: 0.6; }
+        to { transform: rotate(360deg) scale(1.03); opacity: 0.9; }
+      }
+      @keyframes bootOrbitInner {
+        from { transform: rotate(0deg) scale(1.04); opacity: 0.45; }
+        to { transform: rotate(360deg) scale(0.98); opacity: 0.8; }
+      }
+      @keyframes bootGlowPulse {
+        0%, 100% { opacity: 0.5; transform: scale(0.95); }
+        50% { opacity: 1; transform: scale(1.08); }
+      }
+    </style>
   </head>
   <body>
+    <div id="global-boot-splash" class="boot-splash" role="status" aria-live="polite">
+      <span class="boot-splash-orbit boot-splash-orbit--outer" aria-hidden="true"></span>
+      <span class="boot-splash-orbit boot-splash-orbit--inner" aria-hidden="true"></span>
+      <img src="/null-logo.svg" class="boot-splash-logo" alt="Null" />
+      <span class="boot-splash-glow" aria-hidden="true"></span>
+      <p class="boot-splash-label">Null</p>
+    </div>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
