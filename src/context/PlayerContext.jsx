@@ -100,6 +100,14 @@ function isYoutubeCacheUrl(url = "") {
   return typeof url === "string" && url.includes(YOUTUBE_CACHE_PATH);
 }
 
+function isYoutubeTrack(track) {
+  if (!track) return false;
+  if (track.source === 'youtube') return true;
+  if (typeof track.videoId === 'string' && track.videoId.trim()) return true;
+  if (typeof track.id === 'string' && /^yt-/.test(track.id)) return true;
+  return false;
+}
+
 export const usePlayer = () => useContext(PlayerContext);
 
 export const PlayerProvider = ({ children }) => {
@@ -728,7 +736,7 @@ export const PlayerProvider = ({ children }) => {
       // Deduplicate and filter out already played/queued tracks
       const seen = new Set();
 
-      return results.filter(track => {
+      const filtered = results.filter(track => {
         if (!track?.id) return false;
         if (seen.has(track.id)) return false;
         if (queueIds.has(track.id)) return false;
@@ -736,7 +744,9 @@ export const PlayerProvider = ({ children }) => {
         if (seedTrack?.id && track.id === seedTrack.id) return false;
         seen.add(track.id);
         return true;
-      }).slice(0, 20);
+      });
+
+      return filtered.filter(isYoutubeTrack).slice(0, 20);
     } catch (error) {
       console.error('Recommendation fetch failed:', error);
       return [];
@@ -944,11 +954,13 @@ export const PlayerProvider = ({ children }) => {
 
       // Deduplicate
       const seen = new Set();
-      return results.filter(track => {
+      const filtered = results.filter(track => {
         if (!track?.id || seen.has(track.id) || track.id === seedTrack.id) return false;
         seen.add(track.id);
         return true;
-      }).slice(0, 15);
+      });
+
+      return filtered.filter(isYoutubeTrack).slice(0, 15);
     } catch {
       return [];
     }

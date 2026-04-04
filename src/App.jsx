@@ -998,7 +998,14 @@ function App() {
 
       if (!combined.length) {
         const normalized = term.toLowerCase();
-        const localFallback = searchTrackPool.filter((track) => (
+        const localPool = dedupeTracks([
+          ...searchResults,
+          ...downloadedTracks,
+          ...favorites,
+          ...history,
+          ...playlists.flatMap((playlist) => playlist.tracks || []),
+        ]);
+        const localFallback = localPool.filter((track) => (
           matchesSearchQuery(track.title, normalized)
           || matchesSearchQuery(track.artist, normalized)
           || matchesSearchQuery(track.album, normalized)
@@ -1023,7 +1030,7 @@ function App() {
       setSearchResults([]);
       setSearchError('Search unavailable.');
     } finally { setIsSearchLoading(false); }
-  }, [rememberSearchTerm, searchCache, searchTrackPool]);
+  }, [downloadedTracks, favorites, history, playlists, rememberSearchTerm, searchCache, searchResults]);
 
   const openAuthModal = useCallback((mode = 'login') => {
     setAuthError('');

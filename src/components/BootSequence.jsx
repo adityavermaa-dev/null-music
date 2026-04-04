@@ -18,7 +18,10 @@ export default function BootSequence({ children }) {
     <>
       {!ready && (
         <div className="boot-splash" role="status" aria-live="polite">
+          <span className="boot-splash-orbit boot-splash-orbit--outer" aria-hidden="true" />
+          <span className="boot-splash-orbit boot-splash-orbit--inner" aria-hidden="true" />
           <img src="/null-logo.svg" className="boot-splash-logo" alt="Null" />
+          <span className="boot-splash-glow" aria-hidden="true" />
           <p className="boot-splash-label">Null</p>
         </div>
       )}
