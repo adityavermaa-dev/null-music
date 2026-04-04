@@ -25,10 +25,6 @@ import {
   parseStoredSession,
   serializeSession
 } from "../utils/playerState";
-import {
-  buildLocalRecommendations,
-  loadStoredTrackCollections
-} from "../utils/recommendationFallback";
 import { MusicPlayer } from "../native/musicPlayer";
 const PlayerContext = createContext();
 
@@ -66,6 +62,24 @@ const AUTO_RADIO_STORAGE_KEY = "aura-auto-radio";
 const PLAYBACK_PROFILE_STORAGE_KEY = "aura-playback-profile";
 const OFFLINE_ONLY_STORAGE_KEY = "aura-offline-only";
 const RESUME_STORAGE_KEY = "aura-resume-state";
+const RECO_NOISE_TOKENS = new Set([
+  'song',
+  'songs',
+  'music',
+  'official',
+  'video',
+  'lyric',
+  'lyrics',
+  'audio',
+  'full',
+  'hd',
+  'hq',
+  'feat',
+  'ft',
+  'remix',
+  'version',
+  'new',
+]);
 
 function normalizePlaybackProfile(value) {
   return value === "data-saver" || value === "instant" ? value : "balanced";
@@ -106,6 +120,120 @@ function isYoutubeTrack(track) {
   if (typeof track.videoId === 'string' && track.videoId.trim()) return true;
   if (typeof track.id === 'string' && /^yt-/.test(track.id)) return true;
   return false;
+}
+
+function normalizeRecoText(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function tokenizeRecoText(value) {
+  return normalizeRecoText(value)
+    .split(' ')
+    .map((token) => token.trim())
+    .filter((token) => token.length > 1 && !RECO_NOISE_TOKENS.has(token));
+}
+
+function detectScriptBucket(value) {
+  const text = String(value || '');
+  if (/[\u0900-\u097F]/.test(text)) return 'devanagari';
+  if (/[A-Za-z]/.test(text)) return 'latin';
+  return 'other';
+}
+
+function hasWordOverlap(seedText, candidateText) {
+  const seedTokens = tokenizeRecoText(seedText);
+  if (!seedTokens.length) return false;
+  const candidateTokenSet = new Set(tokenizeRecoText(candidateText));
+  return seedTokens.some((token) => candidateTokenSet.has(token));
+}
+
+function shouldRejectCandidate(seedTrack, candidate) {
+  const candidateArtist = String(candidate?.artist || '').trim().toLowerCase();
+  if (!candidateArtist || candidateArtist === 'unknown artist') return true;
+
+  const seedComposite = `${seedTrack?.title || ''} ${seedTrack?.artist || ''}`;
+  const candidateComposite = `${candidate?.title || ''} ${candidate?.artist || ''}`;
+
+  const seedScript = detectScriptBucket(seedComposite);
+  const candidateScript = detectScriptBucket(candidateComposite);
+  if (seedScript !== 'other' && candidateScript !== 'other' && seedScript !== candidateScript) {
+    return true;
+  }
+
+  const seedHasDjContext = /\b(remix|dj|mashup|non stop)\b/i.test(seedComposite);
+  const candidateHasDjContext = /\b(remix|dj|mashup|non stop)\b/i.test(candidateComposite);
+  if (candidateHasDjContext && !seedHasDjContext) return true;
+
+  return false;
+}
+
+function scoreRecommendation(seedTrack, candidate) {
+  const seedTitleTokens = tokenizeRecoText(seedTrack?.title || '');
+  const seedArtistTokens = tokenizeRecoText(seedTrack?.artist || '');
+  const seedAlbumTokens = tokenizeRecoText(seedTrack?.album || '');
+  const seedTokens = new Set([...seedTitleTokens, ...seedArtistTokens, ...seedAlbumTokens]);
+
+  const titleTokens = tokenizeRecoText(candidate?.title || '');
+  const artistTokens = tokenizeRecoText(candidate?.artist || '');
+  const albumTokens = tokenizeRecoText(candidate?.album || '');
+  const candidateTokens = [...titleTokens, ...artistTokens, ...albumTokens];
+
+  let overlap = 0;
+  for (const token of candidateTokens) {
+    if (seedTokens.has(token)) overlap += 1;
+  }
+
+  const overlapScore = seedTokens.size ? overlap / seedTokens.size : 0;
+  const artistOverlap = seedArtistTokens.length
+    ? seedArtistTokens.filter((token) => artistTokens.includes(token)).length / seedArtistTokens.length
+    : 0;
+
+  const seedScript = detectScriptBucket(`${seedTrack?.title || ''} ${seedTrack?.artist || ''}`);
+  const candidateScript = detectScriptBucket(`${candidate?.title || ''} ${candidate?.artist || ''}`);
+  const scriptBonus = seedScript !== 'other' && seedScript === candidateScript ? 0.18 : 0;
+  const scriptPenalty = seedScript !== 'other' && candidateScript !== 'other' && seedScript !== candidateScript
+    ? -0.2
+    : 0;
+
+  return (overlapScore * 0.72) + (artistOverlap * 0.28) + scriptBonus + scriptPenalty;
+}
+
+function rankRecommendationCandidates(seedTrack, candidates, options = {}) {
+  const { minScore = 0.3, minimumCount = 5, maxCount = 20 } = options;
+  const youtubeOnly = (Array.isArray(candidates) ? candidates : [])
+    .filter(isYoutubeTrack)
+    .filter((track) => !shouldRejectCandidate(seedTrack, track));
+  const ranked = youtubeOnly
+    .map((track) => ({ track, score: scoreRecommendation(seedTrack, track) }))
+    .sort((a, b) => b.score - a.score);
+
+  const relevant = ranked.filter((item) => {
+    if (item.score < minScore) return false;
+    const titleOverlap = hasWordOverlap(seedTrack?.title || '', item.track?.title || '');
+    const artistOverlap = hasWordOverlap(seedTrack?.artist || '', item.track?.artist || '');
+    return titleOverlap || artistOverlap;
+  });
+
+  const picked = (relevant.length > 0 ? relevant : ranked.slice(0, minimumCount)).slice(0, maxCount);
+  return picked.map((item) => item.track);
+}
+
+function buildSimilarityQueries(seedTrack) {
+  const title = String(seedTrack?.title || '').trim();
+  const artist = String(seedTrack?.artist || '').trim();
+  const album = String(seedTrack?.album || '').trim();
+  const queries = new Set();
+
+  if (title && artist) queries.add(`${title} ${artist}`.trim());
+  if (title && album) queries.add(`${title} ${album}`.trim());
+  if (title) queries.add(`${title} soundtrack`);
+  if (title) queries.add(`${title} hindi`);
+
+  return [...queries].filter(Boolean);
 }
 
 export const usePlayer = () => useContext(PlayerContext);
@@ -181,7 +309,6 @@ export const PlayerProvider = ({ children }) => {
   const playedIdsRef = useRef(new Set());
   const isFetchingRecsRef = useRef(false);
   const pendingRecsRef = useRef([]);
-  const recoSnapshotRef = useRef({ ts: 0, userId: null, data: null });
   const currentTrackRef = useRef(null);
   const repeatModeRef = useRef(repeatMode);
   const loadAndPlayRef = useRef(null);
@@ -220,29 +347,6 @@ export const PlayerProvider = ({ children }) => {
   }, []);
 
   const clearPlaybackRecovery = useCallback(() => {}, []);
-
-  const getRecommendationSnapshot = useCallback(async () => {
-    const userId = getOrCreateUserId();
-    const now = Date.now();
-
-    // Cache to avoid spamming the backend during autoplay and prefetch.
-    if (
-      recoSnapshotRef.current.data &&
-      recoSnapshotRef.current.userId === userId &&
-      now - recoSnapshotRef.current.ts < 2 * 60 * 1000
-    ) {
-      return recoSnapshotRef.current.data;
-    }
-
-    try {
-      const res = await recommendationsApi.getRecommendationsSafe(userId);
-      if (!res.ok || !res.data) return null;
-      recoSnapshotRef.current = { ts: now, userId, data: res.data };
-      return res.data;
-    } catch {
-      return null;
-    }
-  }, []);
 
   const mergeResolvedTrack = useCallback((baseTrack, patch = {}) => ({
     ...baseTrack,
@@ -692,45 +796,18 @@ export const PlayerProvider = ({ children }) => {
         }
       }
 
-      // Strategy 2: Your backend recommendations (made-for-you / based-on-recent / trending)
-      // These tend to be more stable than generic search fallbacks.
-      if (results.length < 12) {
-        const snapshot = await getRecommendationSnapshot();
-        if (snapshot) {
-          results.push(
-            ...(snapshot.basedOnRecent || []),
-            ...(snapshot.madeForYou || []),
-            ...(snapshot.trending || [])
-          );
-        }
-      }
-
-      // Strategy 3: Saavn suggestions (if Saavn track)
-      // Strategy 3: Targeted YouTube search by title (+ artist) as a last resort
-      // Avoid artist-only search; it produces a lot of low-signal results.
+      // Strategy 2: YouTube expansion by track metadata (closer to "similar songs").
       if (results.length < 16) {
         try {
-          const q = `${seedTrack.title || ''} ${seedTrack.artist || ''}`.trim();
-          if (q) {
+          const queries = buildSimilarityQueries(seedTrack);
+          for (const q of queries) {
             const similarRes = await youtubeApi.searchSongsSafe(q, 8);
             if (similarRes.ok) results.push(...similarRes.data);
+            if (results.length >= 24) break;
           }
         } catch {
           // ignore
         }
-      }
-
-      if (results.length < 16) {
-        const { history, favorites } = loadStoredTrackCollections();
-        results.push(
-          ...buildLocalRecommendations({
-            seedTrack,
-            history,
-            favorites,
-            limit: 12,
-            excludeIds: [...queueIds, ...playedIdsRef.current],
-          })
-        );
       }
 
       // Deduplicate and filter out already played/queued tracks
@@ -746,14 +823,18 @@ export const PlayerProvider = ({ children }) => {
         return true;
       });
 
-      return filtered.filter(isYoutubeTrack).slice(0, 20);
+      return rankRecommendationCandidates(seedTrack, filtered, {
+        minScore: 0.3,
+        minimumCount: 6,
+        maxCount: 20,
+      });
     } catch (error) {
       console.error('Recommendation fetch failed:', error);
       return [];
     } finally {
       isFetchingRecsRef.current = false;
     }
-  }, [getRecommendationSnapshot]);
+  }, []);
 
   /* -------------------------- NEXT TRACK -------------------------- */
 
@@ -932,21 +1013,15 @@ export const PlayerProvider = ({ children }) => {
         }
       }
 
-      // Fill from backend recommendations to keep Discover mixes higher-quality.
+      // Expand around seed metadata via YouTube search before global blends.
       if (results.length < 10) {
-        const snapshot = await getRecommendationSnapshot();
-        if (snapshot) {
-          results.push(
-            ...(snapshot.basedOnRecent || []),
-            ...(snapshot.madeForYou || [])
-          );
-        }
-      }
-
-      if (results.length < 5 && seedTrack.artist) {
         try {
-          const artistRes = await youtubeApi.searchSongsSafe(seedTrack.artist, 8);
-          if (artistRes.ok) results.push(...artistRes.data);
+          const queries = buildSimilarityQueries(seedTrack);
+          for (const query of queries) {
+            const similarRes = await youtubeApi.searchSongsSafe(query, 8);
+            if (similarRes.ok) results.push(...similarRes.data);
+            if (results.length >= 24) break;
+          }
         } catch {
           // ignore
         }
@@ -960,11 +1035,15 @@ export const PlayerProvider = ({ children }) => {
         return true;
       });
 
-      return filtered.filter(isYoutubeTrack).slice(0, 15);
+      return rankRecommendationCandidates(seedTrack, filtered, {
+        minScore: 0.3,
+        minimumCount: 5,
+        maxCount: 15,
+      });
     } catch {
       return [];
     }
-  }, [getRecommendationSnapshot]);
+  }, []);
 
   /* -------------------------- AUTO RADIO TOGGLE -------------------------- */
 

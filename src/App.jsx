@@ -973,6 +973,27 @@ function App() {
     return () => window.removeEventListener('keydown', handler);
   }, [togglePlay, skipNext, skipPrev]);
 
+  const rememberSearchTerm = useCallback((term) => {
+    const normalized = String(term || '').trim();
+    if (!normalized) return;
+
+    setSearchHistory((prev) => {
+      const current = Array.isArray(prev) ? prev : [];
+      const next = [normalized, ...current.filter((item) => String(item || '').toLowerCase() !== normalized.toLowerCase())];
+      return next.slice(0, 12);
+    });
+  }, [setSearchHistory]);
+
+  const clearSearchHistory = useCallback(() => {
+    setSearchHistory([]);
+  }, [setSearchHistory]);
+
+  const removeSearchHistoryTerm = useCallback((term) => {
+    const normalized = String(term || '').trim().toLowerCase();
+    if (!normalized) return;
+    setSearchHistory((prev) => (Array.isArray(prev) ? prev : []).filter((item) => String(item || '').trim().toLowerCase() !== normalized));
+  }, [setSearchHistory]);
+
   /* ════════════════ Search ════════════════ */
   const handleSearch = useCallback(async (query, options = {}) => {
     const { force = false } = options;
@@ -1735,27 +1756,6 @@ function App() {
 
     return collected;
   }, [recentSearchTerms, searchCache, searchTrackPool]);
-
-  const rememberSearchTerm = useCallback((term) => {
-    const normalized = String(term || '').trim();
-    if (!normalized) return;
-
-    setSearchHistory((prev) => {
-      const current = Array.isArray(prev) ? prev : [];
-      const next = [normalized, ...current.filter((item) => String(item || '').toLowerCase() !== normalized.toLowerCase())];
-      return next.slice(0, 12);
-    });
-  }, [setSearchHistory]);
-
-  const clearSearchHistory = useCallback(() => {
-    setSearchHistory([]);
-  }, [setSearchHistory]);
-
-  const removeSearchHistoryTerm = useCallback((term) => {
-    const normalized = String(term || '').trim().toLowerCase();
-    if (!normalized) return;
-    setSearchHistory((prev) => (Array.isArray(prev) ? prev : []).filter((item) => String(item || '').trim().toLowerCase() !== normalized));
-  }, [setSearchHistory]);
 
   const handlePlayAll = useCallback((tracks) => {
     const playableTracks = buildPlayableQueue(tracks);

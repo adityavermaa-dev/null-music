@@ -4,14 +4,19 @@
     android:height="128dp"
     android:viewportWidth="128"
     android:viewportHeight="128">
-    <path
-        android:fillColor="#151924"
-        android:pathData="M64,0A64,64 0 1,1 0,64A64,64 0 0,1 64,0z" />
-    <path
-        android:fillColor="#2B3246"
-        android:pathData="M64,17A47,47 0 1,1 17,64A47,47 0 0,1 64,17z"
-        android:fillAlpha="0.45" />
-    <path
-        android:fillColor="#F97316"
-        android:pathData="M36,89V38h14l29,32V38h13v51H79L49,57v32z" />
+    <group
+        android:name="logoGroup"
+        android:pivotX="64"
+        android:pivotY="64">
+        <path
+            android:fillColor="#151924"
+            android:pathData="M64,0A64,64 0 1,1 0,64A64,64 0 0,1 64,0z" />
+        <path
+            android:fillColor="#2B3246"
+            android:pathData="M64,17A47,47 0 1,1 17,64A47,47 0 0,1 64,17z"
+            android:fillAlpha="0.45" />
+        <path
+            android:fillColor="#F97316"
+            android:pathData="M36,89V38h14l29,32V38h13v51H79L49,57v32z" />
+    </group>
 </vector>
