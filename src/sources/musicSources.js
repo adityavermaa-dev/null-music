@@ -1,5 +1,5 @@
 import { resolveYtdlpEndpointStream } from './ytdlpSource.js';
-import { resolveYoutubeiClientStream } from './youtubeiSource.js';
+import { resolvePipedStream } from './pipedSource.js';
 
 const STREAM_CACHE_TTL_MS = 10 * 60 * 1000;
 
@@ -12,7 +12,7 @@ export function createMusicSources({
   youtubeApi,
   jamendoApi,
   soundcloudApi,
-  youtubeiClientResolver = resolveYoutubeiClientStream,
+  pipedResolver = resolvePipedStream,
   ytdlpResolver = resolveYtdlpEndpointStream,
   monochromeResolver,
 }) {
@@ -48,9 +48,9 @@ export function createMusicSources({
   }
 
   async function resolveYoutubePrimary(videoId, track) {
-    if (!youtubeiClientResolver) return null;
+    if (!monochromeResolver) return null;
 
-    const resolved = await youtubeiClientResolver(videoId, {
+    const resolved = await monochromeResolver(videoId, {
       title: track?.title,
       artist: track?.artist,
     });
@@ -58,7 +58,7 @@ export function createMusicSources({
     if (resolved?.streamUrl) {
       const nextResolved = {
         ...resolved,
-        streamSource: resolved.streamSource || 'youtubei-client',
+        streamSource: resolved.streamSource || 'monochrome',
       };
       setCachedStream(videoId, nextResolved);
       return nextResolved;
@@ -68,9 +68,9 @@ export function createMusicSources({
   }
 
   async function resolveYoutubeFallback(videoId, track) {
-    if (!monochromeResolver) return null;
+    if (!pipedResolver) return null;
 
-    const resolved = await monochromeResolver(videoId, {
+    const resolved = await pipedResolver(videoId, {
       title: track?.title,
       artist: track?.artist,
     });
@@ -79,7 +79,7 @@ export function createMusicSources({
 
     const nextResolved = {
       ...resolved,
-      streamSource: resolved.streamSource || 'monochrome',
+      streamSource: resolved.streamSource || 'piped',
     };
     setCachedStream(videoId, nextResolved);
     return nextResolved;

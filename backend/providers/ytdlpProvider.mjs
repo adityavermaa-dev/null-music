@@ -97,6 +97,7 @@ export function buildYtdlpArgs(videoId, options = {}) {
   const skipWebpage = String(process.env.YT_PLAYER_SKIP || '').trim();
   const fetchPot = String(process.env.YT_FETCH_POT || 'never').trim();
   const extractorParts = [];
+  if (playerClient) extractorParts.push(`player_client=${playerClient}`);
   if (skipWebpage) extractorParts.push(`player_skip=${skipWebpage}`);
   if (fetchPot && fetchPot !== 'never') extractorParts.push(`fetch_pot=${fetchPot}`);
   if (dataSyncId) extractorParts.push(`data_sync_id=${dataSyncId}`);

@@ -27,7 +27,7 @@ async function getInnertubeClient() {
   if (!innertubePromise) {
     innertubePromise = (async () => {
       if (!youtubeiModulePromise) {
-        youtubeiModulePromise = import('youtubei.js');
+        youtubeiModulePromise = import('youtubei.js/web.bundle');
       }
 
       const { Innertube } = await youtubeiModulePromise;
@@ -66,31 +66,35 @@ export async function resolveYoutubeiClientStream(videoId, options = {}) {
 
   const timeoutMs = Math.max(1500, Number(options.timeoutMs || 3500));
 
-  return await resolveWithTimeout(async () => {
-    const innertube = await getInnertubeClient();
+  try {
+    return await resolveWithTimeout(async () => {
+      const innertube = await getInnertubeClient();
 
-    let info = null;
-    try {
-      info = await innertube.music.getInfo(videoId);
-    } catch {
-      info = null;
-    }
-
-    if (!pickBestAudioUrl(info)) {
+      let info = null;
       try {
-        info = await innertube.getInfo(videoId);
+        info = await innertube.music.getInfo(videoId);
       } catch {
         info = null;
       }
-    }
 
-    const streamUrl = pickBestAudioUrl(info);
-    if (!streamUrl) return null;
+      if (!pickBestAudioUrl(info)) {
+        try {
+          info = await innertube.getInfo(videoId);
+        } catch {
+          info = null;
+        }
+      }
 
-    return {
-      streamUrl,
-      streamSource: 'youtubei-client',
-      verified: true,
-    };
-  }, timeoutMs);
+      const streamUrl = pickBestAudioUrl(info);
+      if (!streamUrl) return null;
+
+      return {
+        streamUrl,
+        streamSource: 'youtubei-client',
+        verified: true,
+      };
+    }, timeoutMs);
+  } catch {
+    return null;
+  }
 }

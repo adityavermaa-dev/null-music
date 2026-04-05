@@ -19,7 +19,6 @@ import { recommendationsApi } from "../api/recommendations";
 import { getOrCreateUserId } from "../utils/userId";
 import { createMusicSources } from "../sources/musicSources";
 import { resolveMonochromeStream } from "../sources/monochromeSource";
-import { resolveYoutubeiClientStream } from "../sources/youtubeiSource";
 
 import {
   buildPlaybackSession,
@@ -365,7 +364,6 @@ export const PlayerProvider = ({ children }) => {
     youtubeApi,
     jamendoApi,
     soundcloudApi,
-    youtubeiClientResolver: resolveYoutubeiClientStream,
     monochromeResolver: resolveMonochromeStream,
   })).current;
 

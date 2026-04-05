@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import { createMusicSources } from '../src/sources/musicSources.js';
 
-test('youtube source uses client youtubei resolver when available', async () => {
+test('youtube source uses monochrome resolver as primary source', async () => {
   const youtubeApi = {
     async searchSongsSafe() {
       return { ok: true, data: [] };
@@ -12,44 +12,44 @@ test('youtube source uses client youtubei resolver when available', async () => 
 
   const sources = createMusicSources({
     youtubeApi,
-    youtubeiClientResolver: async () => ({
-      streamUrl: 'https://media.example/client-audio.webm',
-      streamSource: 'youtubei-client',
+    monochromeResolver: async () => ({
+      streamUrl: 'https://media.example/mono-audio.webm',
+      streamSource: 'monochrome',
     }),
   });
   const resolved = await sources.youtube.getStreamUrl({ id: 'yt-abc123def45', title: 'Song', artist: 'Artist' });
 
   assert.ok(resolved);
-  assert.equal(resolved.streamUrl, 'https://media.example/client-audio.webm');
-  assert.equal(resolved.streamSource, 'youtubei-client');
+  assert.equal(resolved.streamUrl, 'https://media.example/mono-audio.webm');
+  assert.equal(resolved.streamSource, 'monochrome');
 });
 
-test('youtube source falls back to monochrome resolver after client resolver fails', async () => {
+test('youtube source falls back to piped resolver after monochrome fails', async () => {
   const youtubeApi = {
     async searchSongsSafe() {
       return { ok: true, data: [] };
     },
   };
 
-  let monochromeCalls = 0;
+  let pipedCalls = 0;
 
   const sources = createMusicSources({
     youtubeApi,
-    youtubeiClientResolver: async () => null,
-    monochromeResolver: async () => {
-      monochromeCalls += 1;
+    monochromeResolver: async () => null,
+    pipedResolver: async () => {
+      pipedCalls += 1;
       return {
-        streamUrl: 'https://mono.example/audio.webm',
-        streamSource: 'monochrome',
+        streamUrl: 'https://piped.example/audio.webm',
+        streamSource: 'piped',
       };
     },
   });
 
   const resolved = await sources.youtube.getStreamUrl({ id: 'yt-xyz98765432', title: 'Song', artist: 'Artist' });
   assert.ok(resolved);
-  assert.equal(resolved.streamUrl, 'https://mono.example/audio.webm');
-  assert.equal(resolved.streamSource, 'monochrome');
-  assert.equal(monochromeCalls, 1);
+  assert.equal(resolved.streamUrl, 'https://piped.example/audio.webm');
+  assert.equal(resolved.streamSource, 'piped');
+  assert.equal(pipedCalls, 1);
 });
 
 test('monochrome source resolves youtube ids', async () => {
