@@ -13,6 +13,7 @@ import { listenbrainzDashboardApi } from './api/listenbrainzDashboard';
 import { lastfmApi } from './api/lastfm';
 import { youtubePlaylistsApi } from './api/youtubePlaylists';
 import { bandcampApi } from './api/bandcamp';
+import { saavnApi } from './api/saavn';
 import { nativeMediaApi } from './api/nativeMedia';
 import { recommendationsApi } from './api/recommendations';
 import { authApi } from './api/auth';
@@ -1028,12 +1029,29 @@ function App() {
 
     try {
       const userId = getOrCreateUserId();
-      const recoRes = await recommendationsApi.getRecommendationsSafe(userId);
+      const [recoRes, saavnRes] = await Promise.all([
+        recommendationsApi.getRecommendationsSafe(userId),
+        saavnApi.getTrendingSafe(),
+      ]);
+      const saavnTrending = saavnRes.ok ? (saavnRes.data || []).map(saavnApi.formatTrack).filter((track) => track?.streamUrl) : [];
+
       if (recoRes.ok && recoRes.data?.trending?.length) {
-        setTopTracks(onlyYoutube(recoRes.data.trending));
+        const ytTrending = onlyYoutube(recoRes.data.trending);
+        setTopTracks(ytTrending.length > 0 ? ytTrending : saavnTrending);
         return;
       }
       const ytFallback = await youtubeApi.searchSongsSafe('Top hits', 20);
+      const ytTrending = ytFallback.ok ? onlyYoutube(ytFallback.data || []) : [];
+      if (ytTrending.length > 0) {
+        setTopTracks([...ytTrending, ...saavnTrending].slice(0, 20));
+        return;
+      }
+
+      if (saavnTrending.length > 0) {
+        setTopTracks(saavnTrending.slice(0, 20));
+        return;
+      }
+
       if (!ytFallback.ok) {
         if (localFallback.length) {
           setTopTracks(localFallback);
@@ -1073,10 +1091,12 @@ function App() {
     const localRecentTracks = dedupeTracks([...downloadedTracks, ...history]).slice(0, 12);
 
     try {
-      const [newRes, popularRes] = await Promise.all([
+      const [newRes, popularRes, saavnRes] = await Promise.all([
         youtubeApi.searchSongsSafe('New releases', 8),
         youtubeApi.searchSongsSafe('Popular right now', 8),
+        saavnApi.getHomeFeedSafe(),
       ]);
+      const saavnSections = saavnRes.ok ? (saavnRes.data?.sections || []) : [];
       let nextSections = [];
       if (!newRes.ok && !popularRes.ok) {
         if (localMixTracks.length) {
@@ -1113,6 +1133,10 @@ function App() {
         if (dashboardSections.length) {
           nextSections = [...nextSections, ...dashboardSections];
         }
+      }
+
+      if (saavnSections.length) {
+        nextSections = [...nextSections, ...saavnSections];
       }
 
       setDiscoverSections(nextSections);
@@ -1204,12 +1228,6 @@ function App() {
 
   const clearSearchHistory = useCallback(() => {
     setSearchHistory([]);
-  }, [setSearchHistory]);
-
-  const removeSearchHistoryTerm = useCallback((term) => {
-    const normalized = String(term || '').trim().toLowerCase();
-    if (!normalized) return;
-    setSearchHistory((prev) => (Array.isArray(prev) ? prev : []).filter((item) => String(item || '').trim().toLowerCase() !== normalized));
   }, [setSearchHistory]);
 
   /* ════════════════ Search ════════════════ */
@@ -2234,6 +2252,28 @@ function App() {
     return collected;
   }, [recentSearchTerms, searchCache, searchTrackPool]);
 
+  const homeFeatureTracks = useMemo(() => dedupeTracks([
+    ...(personalMix?.tracks || []).slice(0, 4),
+    ...(dailyMix?.tracks || []).slice(0, 4),
+    ...(topTracks || []).slice(0, 4),
+    ...(madeForYou?.tracks || []).slice(0, 4),
+    ...(basedOnRecent?.tracks || []).slice(0, 4),
+  ]).slice(0, 8), [basedOnRecent, dailyMix, madeForYou, personalMix, topTracks]);
+
+  const homeStats = useMemo(() => {
+    const libraryCount = dedupeTracks([...favorites, ...downloadedTracks, ...history]).length;
+    return [
+      { label: 'Library', value: libraryCount.toString() },
+      { label: 'Rails', value: String(discoverSections.length) },
+      { label: 'Spotlight', value: homeFeatureTracks.length.toString() },
+    ];
+  }, [downloadedTracks, discoverSections.length, favorites, history, homeFeatureTracks.length]);
+
+  const homeHeroQueue = useMemo(
+    () => buildPlayableQueue(homeFeatureTracks.length > 0 ? homeFeatureTracks : topTracks),
+    [buildPlayableQueue, homeFeatureTracks, topTracks]
+  );
+
   const handlePlayAll = useCallback((tracks) => {
     const playableTracks = buildPlayableQueue(tracks);
     if (playableTracks.length > 0) playTrack(playableTracks[0], playableTracks);
@@ -3029,6 +3069,67 @@ function App() {
             {/* ═══════════ HOME TAB ═══════════ */}
             {activeTab === 'home' && (
               <>
+                <section className="home-hero">
+                  <div className="home-hero-copy">
+                    <p className="settings-eyebrow">Curated for the moment</p>
+                    <h2>One home for fast discovery, bigger mixes, and safer fallback playback.</h2>
+                    <p>
+                      Trending songs, personalized rails, and Saavn-powered backups keep the home feed moving even when a source is thin.
+                    </p>
+                    <div className="home-hero-actions">
+                      <button
+                        className="section-action-btn home-hero-action home-hero-action--primary"
+                        onClick={() => handleShuffleAll(homeFeatureTracks.length > 0 ? homeFeatureTracks : topTracks)}
+                        type="button"
+                      >
+                        <Shuffle size={14} /> Shuffle
+                      </button>
+                      <button
+                        className="section-action-btn home-hero-action"
+                        onClick={() => handlePlayAll(homeFeatureTracks.length > 0 ? homeFeatureTracks : topTracks)}
+                        type="button"
+                      >
+                        <Play size={14} /> Play featured
+                      </button>
+                      <button
+                        className="section-action-btn home-hero-action"
+                        onClick={() => handleTabChange('radio')}
+                        type="button"
+                      >
+                        <Music size={14} /> Radio
+                      </button>
+                    </div>
+                    <div className="home-hero-stats">
+                      {homeStats.map((stat) => (
+                        <div key={stat.label} className="home-hero-stat">
+                          <strong>{stat.value}</strong>
+                          <span>{stat.label}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="home-hero-grid" aria-label="Featured tracks">
+                    {homeFeatureTracks.slice(0, 6).map((track, index) => (
+                      <button
+                        key={`${track.id}-${index}`}
+                        className="home-hero-card"
+                        onClick={() => playTrack(resolvePlayableTrack(track), homeHeroQueue, { mode: 'radio' })}
+                        type="button"
+                      >
+                        <span className="home-hero-card-index">{String(index + 1).padStart(2, '0')}</span>
+                        <div
+                          className="home-hero-card-art"
+                          style={track.coverArt ? { backgroundImage: `url(${track.coverArt})` } : undefined}
+                        />
+                        <div className="home-hero-card-copy">
+                          <strong>{track.title || 'Untitled'}</strong>
+                          <span>{track.artist || 'Unknown artist'}</span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+
                 {resumeState?.track && (
                   <section className="resume-card">
                     <div className="resume-card-copy">
@@ -3055,9 +3156,16 @@ function App() {
 
                 {isOffline && downloadedTracks.length > 0 && renderHorizontalSection(downloadedTracks, 'Offline Downloads', { playMode: 'list' })}
                 {dailyMix && renderHorizontalSection(dailyMix.tracks, dailyMix.title)}
-                {topTracks.length > 0 && renderTrackList(topTracks, 'Trending Songs')}
-                {basedOnRecent && renderTrackList(basedOnRecent.tracks, basedOnRecent.title)}
+                {topTracks.length > 0 && renderTrackList(topTracks, 'Trending Songs', { filterYoutubeOnly: false })}
+                {basedOnRecent && renderTrackList(basedOnRecent.tracks, basedOnRecent.title, { filterYoutubeOnly: false })}
                 {personalMix && renderHorizontalSection(personalMix.tracks, personalMix.title)}
+                {discoverSections.map((section, i) => (
+                  <div key={`${section.title}-${i}`}>
+                    {i === 0
+                      ? renderTrackList(section.tracks, section.title, { filterYoutubeOnly: section.filterYoutubeOnly !== false })
+                      : renderHorizontalSection(section.tracks, section.title)}
+                  </div>
+                ))}
               </>
             )}
 
@@ -3072,12 +3180,14 @@ function App() {
                 )}
 
                 {discoverSections.map((section, i) => (
-                  i === 0
-                    ? renderTrackList(section.tracks, section.title, { key: i })
-                    : renderHorizontalSection(section.tracks, section.title)
+                  <div key={`${section.title}-${i}`}>
+                    {i === 0
+                      ? renderTrackList(section.tracks, section.title, { filterYoutubeOnly: section.filterYoutubeOnly !== false })
+                      : renderHorizontalSection(section.tracks, section.title)}
+                  </div>
                 ))}
 
-                {madeForYou && renderTrackList(madeForYou.tracks, madeForYou.title)}
+                {madeForYou && renderTrackList(madeForYou.tracks, madeForYou.title, { filterYoutubeOnly: false })}
               </>
             )}
 
@@ -3191,7 +3301,7 @@ function App() {
               </section>
             )}
             {activeTab === 'library' && librarySubView === 'made-for-you' && (
-              madeForYou ? renderTrackList(madeForYou.tracks, madeForYou.title) : <div className="empty-state">Start listening to build your personalized mix</div>
+              madeForYou ? renderTrackList(madeForYou.tracks, madeForYou.title, { filterYoutubeOnly: false }) : <div className="empty-state">Start listening to build your personalized mix</div>
             )}
             {activeTab === 'library' && librarySubView === 'settings' && renderSettingsView()}
             {activeTab === 'library' && librarySubView?.startsWith('playlist-') && (() => {
@@ -3242,46 +3352,38 @@ function App() {
                 {!isSearchLoading && searchQuery && searchFilter === 'albums' && renderSearchCollection(matchingAlbums, `Albums for "${searchQuery}"`, 'albums')}
                 {!isSearchLoading && searchQuery && searchFilter === 'playlists' && renderSearchCollection(matchingPlaylists, `Playlists for "${searchQuery}"`, 'playlists')}
 
-                {!searchQuery && recentSearchTerms.length > 0 && (
+                {!searchQuery && recentSearchTracks.length > 0 && (
                   <section className="track-section">
                     <div className="section-header">
-                      <h2>Recent Searches</h2>
+                      <h2>Recently Searched</h2>
                       <button className="section-action-btn" onClick={clearSearchHistory} type="button">
                         Clear
                       </button>
                     </div>
-                    <div className="search-history-chip-row">
-                      {recentSearchTerms.map((term) => (
-                        <div key={term} className="search-history-chip">
-                          <button
-                            className="settings-chip"
-                            onClick={() => handleSearch(term, { force: true })}
-                            type="button"
-                          >
-                            {term}
-                          </button>
-                          <button
-                            className="search-history-remove"
-                            onClick={() => removeSearchHistoryTerm(term)}
-                            aria-label={`Remove ${term} from search history`}
-                            title="Remove"
-                            type="button"
-                          >
-                            <X size={12} />
-                          </button>
-                        </div>
+                    <div className="track-grid" role="list">
+                      {recentSearchTracks.map((track, index) => (
+                        <TrackCard
+                          key={track.id + index}
+                          track={track}
+                          isActive={isTrackActive(track)}
+                          isPlaying={isTrackActive(track)}
+                          isFav={isTrackFavorite(track)}
+                          isDownloaded={isTrackDownloaded(track)}
+                          onPlay={(t) => playTrack(resolvePlayableTrack(t), buildPlayableQueue(recentSearchTracks), { mode: 'radio' })}
+                          onWarm={(t) => {
+                            if (t?.source === 'youtube') {
+                              void preResolveStream(t).catch(() => {});
+                            }
+                          }}
+                          onFav={toggleFavorite}
+                          onContextMenu={(event, t) => handleTrackContextMenu(event, t, recentSearchTracks)}
+                        />
                       ))}
                     </div>
                   </section>
                 )}
 
-                {!searchQuery && recentSearchTracks.length > 0 && renderTrackList(recentSearchTracks, 'From your previous searches', {
-                  showActions: false,
-                  playMode: 'radio',
-                  filterYoutubeOnly: false,
-                })}
-
-                {!searchQuery && recentSearchTracks.length === 0 && topTracks.length > 0 && renderTrackList(topTracks.slice(0, 10), 'Trending')}
+                {!searchQuery && recentSearchTracks.length === 0 && topTracks.length > 0 && renderTrackList(topTracks.slice(0, 10), 'Trending', { filterYoutubeOnly: false })}
               </>
             )}
 

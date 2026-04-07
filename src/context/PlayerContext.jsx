@@ -15,6 +15,7 @@ import { nativeMediaApi } from "../api/nativeMedia";
 import { youtubeApi } from "../api/youtube";
 import { jamendoApi } from "../api/jamendo";
 import { soundcloudApi } from "../api/soundcloud";
+import { saavnApi } from "../api/saavn";
 import { recommendationsApi } from "../api/recommendations";
 import { getOrCreateUserId } from "../utils/userId";
 import { createMusicSources } from "../sources/musicSources";
@@ -364,6 +365,7 @@ export const PlayerProvider = ({ children }) => {
     youtubeApi,
     jamendoApi,
     soundcloudApi,
+    saavnApi,
     monochromeResolver: resolveMonochromeStream,
   })).current;
 

@@ -4,6 +4,16 @@ import { friendlyErrorMessage, logError } from '../utils/logger';
 import { API_BASE } from './apiBase';
 
 const SAAVN_API_BASE = `${API_BASE}/saavn`;
+const HOME_FEED_QUERIES = [
+  { title: 'Bollywood Heat', query: 'Bollywood hits 2025' },
+  { title: 'Hindi Anthems', query: 'Hindi songs 2025' },
+  { title: 'Pop Pulse', query: 'Pop hits 2025' },
+  { title: 'Lo-Fi Drift', query: 'lofi chill beats' },
+  { title: 'Indie Bloom', query: 'indie songs 2025' },
+  { title: 'Romantic Wave', query: 'romantic songs hindi' },
+  { title: 'Party Starter Pack', query: 'party songs 2025' },
+  { title: 'Retro Rewind', query: '90s hits throwback' },
+];
 
 const decodeHtml = (value) =>
   String(value || '')
@@ -29,6 +39,19 @@ const pickBestImage = (images = []) => {
     })[0];
 
   return preferred?.url || '';
+};
+
+const dedupeTracks = (tracks = []) => {
+  const seen = new Set();
+  const output = [];
+
+  for (const track of tracks) {
+    if (!track?.id || seen.has(track.id)) continue;
+    seen.add(track.id);
+    output.push(track);
+  }
+
+  return output;
 };
 
 const requestSaavn = async (tag, path, config, fallbackMessage) => {
@@ -215,6 +238,39 @@ export const saavnApi = {
     return {
       ok: true,
       data: (result.response?.data?.data || []).map(saavnApi.formatTrack),
+      error: null,
+    };
+  },
+
+  getHomeFeedSafe: async () => {
+    const rows = await Promise.all(
+      HOME_FEED_QUERIES.map(async ({ title, query }) => {
+        const result = await saavnApi.searchSongsSafe(query, 12);
+        const tracks = dedupeTracks((result.data || []).map(saavnApi.formatTrack).filter((track) => track?.streamUrl)).slice(0, 10);
+
+        return {
+          title,
+          query,
+          tracks,
+        };
+      })
+    );
+
+    const sections = rows.filter((row) => row.tracks.length > 0).map((row) => ({
+      title: row.title,
+      query: row.query,
+      tracks: row.tracks,
+      filterYoutubeOnly: false,
+    }));
+
+    const featured = dedupeTracks(sections.flatMap((section) => section.tracks)).slice(0, 18);
+
+    return {
+      ok: true,
+      data: {
+        featured,
+        sections,
+      },
       error: null,
     };
   },

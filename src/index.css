@@ -816,6 +816,7 @@ button { border: none; background: transparent; cursor: pointer; font-family: in
     min-height: 2.6em;
     overflow: hidden;
     text-overflow: ellipsis;
+    line-clamp: 2;
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 2;
     line-height: 1.3;
@@ -858,7 +859,7 @@ button { border: none; background: transparent; cursor: pointer; font-family: in
 .discover-view .track-card:hover { transform: translateY(-2px); background: transparent; }
 .discover-view .cover-art-wrapper { width: auto; height: auto; margin-bottom: 8px; }
 .discover-view .cover-art { width: 100%; height: auto; aspect-ratio: 1; border-radius: var(--radius-md); }
-.discover-view .track-title { -webkit-line-clamp: 2; display: -webkit-box; -webkit-box-orient: vertical; white-space: normal; }
+.discover-view .track-title { line-clamp: 2; -webkit-line-clamp: 2; display: -webkit-box; -webkit-box-orient: vertical; white-space: normal; }
 .discover-view .fav-btn { opacity: 0; }
 .discover-view .track-card:hover .fav-btn, .discover-view .fav-btn--active { opacity: 1; }
 
@@ -1500,6 +1501,161 @@ button { border: none; background: transparent; cursor: pointer; font-family: in
 }
 
 /* ═══════════════════════════════════════════════════════
+   HOME HERO
+   ═══════════════════════════════════════════════════════ */
+.home-hero {
+    margin: 0 16px 20px;
+    padding: 18px;
+    border-radius: 28px;
+    border: 1px solid rgba(252, 60, 68, 0.16);
+    background:
+        radial-gradient(circle at top left, rgba(252, 60, 68, 0.28), transparent 38%),
+        radial-gradient(circle at 80% 0%, rgba(96, 165, 250, 0.18), transparent 30%),
+        linear-gradient(135deg, rgba(10, 10, 10, 0.96), rgba(26, 26, 26, 0.92));
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.32);
+    display: grid;
+    gap: 16px;
+}
+
+.home-hero-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.home-hero-copy h2 {
+    font-size: 30px;
+    line-height: 1.02;
+    letter-spacing: -1px;
+    font-weight: 900;
+    max-width: 14ch;
+}
+
+.home-hero-copy p {
+    color: var(--text-200);
+    font-size: 14px;
+    line-height: 1.55;
+    max-width: 50ch;
+}
+
+.home-hero-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.home-hero-action {
+    border-color: rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-100);
+}
+
+.home-hero-action--primary {
+    background: linear-gradient(135deg, var(--primary-500), #f97316);
+    border-color: transparent;
+    color: #fff;
+}
+
+.home-hero-stats {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.home-hero-stat {
+    padding: 12px 10px;
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.home-hero-stat strong {
+    display: block;
+    font-size: 18px;
+    line-height: 1;
+    color: var(--text-100);
+}
+
+.home-hero-stat span {
+    display: block;
+    margin-top: 4px;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-300);
+}
+
+.home-hero-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.home-hero-card {
+    text-align: left;
+    border-radius: 22px;
+    padding: 10px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: var(--text-100);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 180px;
+    transition: transform var(--transition-med), background var(--transition-med), border-color var(--transition-med);
+}
+
+.home-hero-card:hover {
+    transform: translateY(-2px);
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.14);
+}
+
+.home-hero-card-index {
+    align-self: flex-start;
+    font-size: 11px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--text-300);
+}
+
+.home-hero-card-art {
+    width: 100%;
+    aspect-ratio: 1;
+    border-radius: 18px;
+    background:
+        linear-gradient(160deg, rgba(252, 60, 68, 0.22), rgba(96, 165, 250, 0.16)),
+        var(--surface-300);
+    background-size: cover;
+    background-position: center;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.home-hero-card-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.home-hero-card-copy strong,
+.home-hero-card-copy span {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.home-hero-card-copy strong {
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.home-hero-card-copy span {
+    font-size: 11px;
+    color: var(--text-300);
+}
+
+/* ═══════════════════════════════════════════════════════
    EQ BAR (playing indicator)
    ═══════════════════════════════════════════════════════ */
 .eq-bar { display: flex; align-items: flex-end; gap: 2px; height: 18px; }
@@ -1578,7 +1734,7 @@ button { border: none; background: transparent; cursor: pointer; font-family: in
 .mobile-player-wrapper {
     display: block;
     position: fixed;
-    bottom: calc(var(--bottom-nav-height) - 10px);
+    bottom: calc(var(--bottom-nav-height) - 2px);
     left: 0;
     right: 0;
     z-index: 1000;
@@ -1595,7 +1751,7 @@ button { border: none; background: transparent; cursor: pointer; font-family: in
     background: var(--chrome-bg-strong);
     backdrop-filter: blur(20px) saturate(1.4);
     -webkit-backdrop-filter: blur(20px) saturate(1.4);
-    box-shadow: 0 2px 16px rgba(0, 0, 0, 0.4);
+    box-shadow: none;
     border: 1px solid var(--divider);
 }
 
@@ -1821,6 +1977,7 @@ button { border: none; background: transparent; cursor: pointer; font-family: in
 
 .fp-slider {
     width: 100%;
+    appearance: none;
     -webkit-appearance: none;
     height: 4px;
     border-radius: 2px;
@@ -2407,9 +2564,15 @@ button { border: none; background: transparent; cursor: pointer; font-family: in
 
 @keyframes slideInRight { from { transform: translateX(100%); } to { transform: translateX(0); } }
 
-.queue-header { padding: 16px 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--divider); }
+.queue-header {
+    padding: calc(env(safe-area-inset-top, 0px) + 14px) 20px 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    border-bottom: 1px solid var(--divider);
+}
 .queue-header h2 { font-size: 17px; font-weight: 800; }
-.queue-header-actions { display: flex; align-items: center; gap: 8px; }
+.queue-header-actions { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
 .queue-list { flex: 1; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 2px; }
 
 .queue-item {
@@ -2736,6 +2899,9 @@ button { border: none; background: transparent; cursor: pointer; font-family: in
     border-radius: var(--radius-lg);
     background: var(--card-bg);
     border: 1px solid var(--glass-border);
+    width: 100%;
+    min-width: 0;
+    overflow: hidden;
 }
 
 .playlist-manage-main {
@@ -2750,6 +2916,7 @@ button { border: none; background: transparent; cursor: pointer; font-family: in
     gap: 12px;
     cursor: pointer;
     min-width: 0;
+    overflow: hidden;
 }
 
 .playlist-manage-cover {
@@ -2786,12 +2953,16 @@ button { border: none; background: transparent; cursor: pointer; font-family: in
 .playlist-manage-copy span {
     color: var(--text-300);
     font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .playlist-manage-actions {
     display: flex;
     align-items: center;
     gap: 8px;
+    flex-shrink: 0;
 }
 
 .issue-modal {
