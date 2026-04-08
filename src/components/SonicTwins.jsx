@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from 'react';
+import { buildApiUrl } from '../api/apiBase';
+import { getStoredAuthSession } from '../utils/authSession';
 
 /**
  * SonicTwins Component
@@ -13,12 +15,25 @@ export function SonicTwins() {
     fetchSonicTwins();
   }, []);
 
+  function getAuthHeaders() {
+    const token = getStoredAuthSession()?.token || '';
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  }
+
+  async function parseJsonOrThrow(response, fallbackMessage) {
+    const contentType = String(response.headers.get('content-type') || '').toLowerCase();
+    if (!contentType.includes('application/json')) {
+      throw new Error(fallbackMessage);
+    }
+    return response.json();
+  }
+
   async function fetchSonicTwins() {
     try {
       setLoading(true);
-      const response = await fetch('/api/user/sonic-twins?limit=20', {
+      const response = await fetch(buildApiUrl('/user/sonic-twins?limit=20'), {
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
+          ...getAuthHeaders(),
         },
       });
 
@@ -26,7 +41,7 @@ export function SonicTwins() {
         throw new Error(`Failed to fetch sonic twins: ${response.statusText}`);
       }
 
-      const data = await response.json();
+      const data = await parseJsonOrThrow(response, 'Sonic Twins service returned an invalid response. Check API base URL.');
       setTwins(data.sonicTwins || []);
       setError(null);
     } catch (err) {

@@ -3,6 +3,8 @@ import { DNAHelix } from './DNAHelix';
 import { GenreBreakdown } from './GenreBreakdown';
 import { SonicTwins } from './SonicTwins';
 import { UserDNACard } from './UserDNACard';
+import { buildApiUrl } from '../api/apiBase';
+import { getStoredAuthSession } from '../utils/authSession';
 import './musicDna.css';
 
 /**
@@ -19,12 +21,25 @@ export function DNAProfile() {
     fetchDNA();
   }, []);
 
+  function getAuthHeaders() {
+    const token = getStoredAuthSession()?.token || '';
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  }
+
+  async function parseJsonOrThrow(response, fallbackMessage) {
+    const contentType = String(response.headers.get('content-type') || '').toLowerCase();
+    if (!contentType.includes('application/json')) {
+      throw new Error(fallbackMessage);
+    }
+    return response.json();
+  }
+
   async function fetchDNA() {
     try {
       setLoading(true);
-      const response = await fetch('/api/user/dna', {
+      const response = await fetch(buildApiUrl('/user/dna'), {
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
+          ...getAuthHeaders(),
         },
       });
 
@@ -32,7 +47,7 @@ export function DNAProfile() {
         throw new Error(`Failed to fetch DNA: ${response.statusText}`);
       }
 
-      const data = await response.json();
+      const data = await parseJsonOrThrow(response, 'Music DNA service returned an invalid response. Check API base URL.');
       setDNA(data.dna);
       setError(null);
     } catch (err) {
@@ -46,10 +61,10 @@ export function DNAProfile() {
   async function handleRefreshDNA() {
     try {
       setLoading(true);
-      const response = await fetch('/api/user/dna/refresh', {
+      const response = await fetch(buildApiUrl('/user/dna/refresh'), {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
+          ...getAuthHeaders(),
           'Content-Type': 'application/json',
         },
       });
@@ -58,7 +73,7 @@ export function DNAProfile() {
         throw new Error(`Failed to refresh DNA: ${response.statusText}`);
       }
 
-      const data = await response.json();
+      const data = await parseJsonOrThrow(response, 'Music DNA refresh returned an invalid response. Check API base URL.');
       setDNA(data.dna);
       setError(null);
     } catch (err) {
