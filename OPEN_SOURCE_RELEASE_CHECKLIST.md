@@ -1,31 +1,57 @@
 # Open Source Release Checklist
 
-Use this before publishing Aura Music publicly or distributing builds from the repo.
+Use this before every public release.
 
-## Repo Hygiene
+## 1) Source Hygiene
 
-- Run a secrets scan against the full Git history, not only the current working tree.
-- Confirm cookies files, API keys, signing materials, and local caches are not tracked.
-- Remove any fresh debug artifacts before tagging a release.
+- Confirm no secrets are committed (.env, keystore, cookies, tokens).
+- Confirm local artifacts are not committed (build folders, debug files, temp scripts).
+- Run a secrets scan against full git history.
 
-## App Hardening
+## 2) Build and Test Gates
 
-- Set `RECO_API_KEY` in production and protect recommendation endpoints.
-- Put the backend behind HTTPS and configure `TRUST_PROXY`.
-- Add Redis for cache durability across restarts.
-- Add monitoring or structured error reporting for both the backend and Android app.
-- Test real-device behavior for weak network, offline playback, queue advance, and resumed playback.
+- CI passes for lint, tests, web build, and Android debug build.
+- Local commands pass:
+	- npm run lint
+	- npm test
+	- npm run build
+- Signed release artifact can be generated successfully.
 
-## Release Engineering
+## 3) Versioning and Changelog
 
-- Make sure CI is green for lint, test, build, and Android debug assemble.
-- Create and verify a signed Android release build outside the repo.
-- Keep a changelog and tag releases consistently.
-- Smoke-test search, playback, downloads, lyrics, recommendations, and widget behavior before each release.
+- Increment versionCode in [android/app/build.gradle](android/app/build.gradle).
+- Update versionName in [android/app/build.gradle](android/app/build.gradle).
+- Update [CHANGELOG.md](CHANGELOG.md) with release notes.
 
-## Public Project Readiness
+## 4) Product Quality Validation
 
-- Keep the README, roadmap, privacy notes, and setup docs up to date.
-- Add current screenshots or short demo recordings for the repo page.
-- Document deployment steps for the backend and any external dependencies.
-- Clarify feature availability by platform whenever Android-only behavior is involved.
+- Manual smoke test on real devices:
+	- launch
+	- search
+	- playback fallback
+	- queue actions
+	- offline downloads
+	- auth sync
+- No critical regressions compared to previous production release.
+
+## 5) Release Rollout Safety
+
+- Start with internal track.
+- Then closed test.
+- Use staged production rollout (5% -> 20% -> 50% -> 100%).
+- Monitor crash and ANR rates between rollout stages.
+
+## 6) Documentation and OSS Readiness
+
+- README is current and includes latest screenshots.
+- Release guide and architecture docs are up to date.
+- Public docs are linked:
+	- [CONTRIBUTING.md](CONTRIBUTING.md)
+	- [SECURITY.md](SECURITY.md)
+	- [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+
+## 7) Post-Release
+
+- Tag git release (example: v1.6.0).
+- Publish release notes.
+- Track issues for 48 hours and hotfix if needed.

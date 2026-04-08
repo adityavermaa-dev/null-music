@@ -1,5 +1,17 @@
 apply plugin: 'com.android.application'
 
+def keystorePropertiesFile = rootProject.file('keystore.properties')
+def keystoreProperties = new Properties()
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
+
+def hasReleaseSigning = keystorePropertiesFile.exists() &&
+    keystoreProperties.containsKey('MYAPP_UPLOAD_STORE_FILE') &&
+    keystoreProperties.containsKey('MYAPP_UPLOAD_KEY_ALIAS') &&
+    keystoreProperties.containsKey('MYAPP_UPLOAD_STORE_PASSWORD') &&
+    keystoreProperties.containsKey('MYAPP_UPLOAD_KEY_PASSWORD')
+
 android {
     namespace = "com.aura.music"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -16,10 +28,25 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        release {
+            if (hasReleaseSigning) {
+                storeFile file(keystoreProperties['MYAPP_UPLOAD_STORE_FILE'])
+                storePassword keystoreProperties['MYAPP_UPLOAD_STORE_PASSWORD']
+                keyAlias keystoreProperties['MYAPP_UPLOAD_KEY_ALIAS']
+                keyPassword keystoreProperties['MYAPP_UPLOAD_KEY_PASSWORD']
+            }
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            if (hasReleaseSigning) {
+                signingConfig signingConfigs.release
+            } else {
+                logger.warn('Release signing properties are missing. Build output will not be publishable to Play Store.')
+            }
         }
     }
 }

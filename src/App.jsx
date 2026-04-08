@@ -34,6 +34,7 @@ import MobilePlayer from './components/MobilePlayer';
 import AsyncState from './components/AsyncState';
 import ReliabilityPanel from './components/ReliabilityPanel';
 import AuthModal from './components/AuthModal';
+import { DNAProfile } from './components/DNAProfile';
 import { logError } from './utils/logger';
 import { buildLocalRecommendations, dedupeTracks } from './utils/recommendationFallback';
 import { emptyUserLibrary, mergeUserLibraries, normalizeLibraryPayload } from '../shared/userLibrary.js';
@@ -231,6 +232,7 @@ const LIBRARY_CATEGORIES = [
   { id: 'history', label: 'Recently Played', icon: Clock },
   { id: 'most-played', label: 'Most Played', icon: Music },
   { id: 'made-for-you', label: 'Made For You', icon: Sparkles },
+  { id: 'dna', label: 'Music DNA', icon: Sparkles },
   { id: 'settings', label: 'Settings & About', icon: Settings },
 ];
 
@@ -3269,6 +3271,7 @@ function App() {
               </>
             )}
             {activeTab === 'library' && librarySubView === 'most-played' && renderTrackList(getMostPlayed, 'Most Played', { filterYoutubeOnly: false })}
+            {activeTab === 'library' && librarySubView === 'dna' && <DNAProfile />}
             {activeTab === 'library' && librarySubView === 'playlists' && (
               <section className="track-section">
                 <div className="section-header">
