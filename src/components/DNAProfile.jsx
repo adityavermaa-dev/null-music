@@ -60,10 +60,6 @@ export function DNAProfile() {
   const [activeTab, setActiveTab] = useState('overview');
   const isOffline = typeof navigator !== 'undefined' ? !navigator.onLine : false;
 
-  useEffect(() => {
-    void fetchDNA();
-  }, [fetchDNA]);
-
   const fetchDNA = useCallback(async () => {
     try {
       const offlineNow = typeof navigator !== 'undefined' ? !navigator.onLine : false;
@@ -148,6 +144,10 @@ export function DNAProfile() {
       setLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    void fetchDNA();
+  }, [fetchDNA]);
 
   if (loading) {
     return (

@@ -601,9 +601,16 @@
 .sonic-twins.error p,
 .sonic-twins.empty p {
   max-width: 100%;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
   word-break: break-word;
   line-height: 1.4;
+}
+
+.sonic-twins.loading .spinner {
+  width: 100%;
+  max-width: 22rem;
+  white-space: normal;
+  letter-spacing: normal;
 }
 
 .sonic-twins h3 {

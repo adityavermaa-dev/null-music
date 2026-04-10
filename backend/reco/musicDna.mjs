@@ -253,15 +253,42 @@ export async function findSonicTwins(userId, limit = 10) {
       historyResult.rows.map(r => normalizeArtistName(r.artist))
     );
 
-    // In a real implementation, this would query a music database or Spotify API
-    // For now, we'll do a similarity search on cached track features
+    // Use sampled features from user_tracks so this works without a global `tracks` table.
+    // The row cap keeps RAM usage predictable on small servers.
     const allTracksResult = await query(
-      `SELECT DISTINCT artist, features FROM tracks 
-       WHERE features IS NOT NULL 
-       LIMIT 1000`
+      `SELECT artist, features
+       FROM user_tracks
+       WHERE user_id <> $1
+         AND artist IS NOT NULL
+         AND features IS NOT NULL
+         AND completion_ratio > 0.2
+       ORDER BY updated_at DESC
+       LIMIT 3000`,
+      [userId]
     );
 
-    const artistScores = calculateArtistSimilarity(userDNA, allTracksResult.rows, userArtists);
+    let artistScores = calculateArtistSimilarity(userDNA, allTracksResult.rows, userArtists);
+
+    // Fallback path if features are scarce: recommend popular unknown artists.
+    if (!Object.keys(artistScores).length) {
+      const popularArtistsResult = await query(
+        `SELECT artist, SUM(play_count) AS score
+         FROM user_tracks
+         WHERE user_id <> $1
+           AND artist IS NOT NULL
+         GROUP BY artist
+         ORDER BY score DESC
+         LIMIT 100`,
+        [userId]
+      );
+
+      artistScores = {};
+      for (const row of popularArtistsResult.rows) {
+        const key = normalizeArtistName(row.artist);
+        if (!key || userArtists.has(key)) continue;
+        artistScores[key] = 0.55;
+      }
+    }
     
     const twins = Object.entries(artistScores)
       .sort((a, b) => b[1] - a[1])

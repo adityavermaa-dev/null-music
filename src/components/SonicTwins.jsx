@@ -15,10 +15,6 @@ export function SonicTwins() {
   const [error, setError] = useState(null);
   const isOffline = typeof navigator !== 'undefined' ? !navigator.onLine : false;
 
-  useEffect(() => {
-    fetchSonicTwins();
-  }, [fetchSonicTwins]);
-
   function getAuthHeaders() {
     const token = getStoredAuthSession()?.token || '';
     return token ? { Authorization: `Bearer ${token}` } : {};
@@ -30,6 +26,19 @@ export function SonicTwins() {
       throw new Error(fallbackMessage);
     }
     return response.json();
+  }
+
+  async function parseErrorBody(response, fallbackMessage) {
+    try {
+      const contentType = String(response.headers.get('content-type') || '').toLowerCase();
+      if (contentType.includes('application/json')) {
+        const body = await response.json();
+        return body?.error || body?.hint || fallbackMessage;
+      }
+    } catch {
+      // ignore parse failures
+    }
+    return fallbackMessage;
   }
 
   function readCachedTwins() {
@@ -88,7 +97,8 @@ export function SonicTwins() {
           setLoading(false);
           return;
         }
-        throw new Error(`Failed to fetch sonic twins: ${response.statusText}`);
+        const message = await parseErrorBody(response, `Failed to fetch sonic twins (${response.status || 'unknown'})`);
+        throw new Error(message);
       }
 
       const data = await parseJsonOrThrow(response, 'Sonic Twins service returned an invalid response. Check API base URL.');
@@ -108,6 +118,10 @@ export function SonicTwins() {
       setLoading(false);
     }
   }, [isOffline]);
+
+  useEffect(() => {
+    void fetchSonicTwins();
+  }, [fetchSonicTwins]);
 
   if (loading) {
     return (
