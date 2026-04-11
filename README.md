@@ -2,14 +2,21 @@
   Null - Free Open-Source Music Player for Android
   SEO Keywords: free music player android, open source music app, no ads music player, offline music, music streaming app
 -->
-
+<img src="https://img.shields.io/github/stars/adit-ya15/music-player?style=social" />
 <p align="center">
-  <img src="./website/assets/favicon.png" alt="Null Music Player Logo" width="120" height="120" style="border-radius: 20px; margin: 20px 0;" />
+  <img src="./screenshots/favicon.png" alt="Null Music Player Logo" width="120" height="120" style="border-radius: 20px; margin: 20px 0;" />
 </p>
 
-# Null — Free Music Player for Android
+<h1 align="center">🚀 Null — Free Music Player for Android</h1>
 
-> **The music player you own.** Stream millions of songs with zero ads, zero subscriptions, zero tracking. Open-source. Always free.
+<p align="center">
+🎵 Millions of songs • 🚫 Zero ads • 📥 Offline • 🧬 Music DNA  
+</p>
+
+<p align="center">
+🔥 Open Source • Free Forever • Built for Android  
+</p>
+
 
 <p align="center">
   <a href="https://null-music.netlify.app/app-release.apk" title="Download Null Music Player APK for Android">
@@ -61,6 +68,26 @@ Personalized recommendations and Music DNA profiling.
 Open-source on GitHub. Contribute and help shape the future.
 
 ---
+## Why Null Exists
+
+Most music apps today:
+- Interrupt your experience with ads  
+- Lock features behind subscriptions  
+- Track your behavior  
+
+Null was built to change that.
+
+👉 A music player that is **free, open, and respects users**
+
+## 🚀 Why People Love Null
+
+- 🚫 No ads — ever  
+- ⚡ Fast and lightweight  
+- 📥 Works offline  
+- 🧬 Unique Music DNA feature  
+- 🔓 Fully open source  
+
+👉 Built for users, not profit
 
 ## Features
 
@@ -229,17 +256,6 @@ cd android
 
 ## Documentation & Resources
 
-| Document | Description |
-| --- | --- |
-| [ARCHITECTURE.md](./ARCHITECTURE.md) | System architecture and data flow |
-| [SECURITY.md](./SECURITY.md) | Security practices and threat model |
-| [PRIVACY.md](./PRIVACY.md) | Privacy policy and data handling |
-| [CONTRIBUTING.md](./CONTRIBUTING.md) | How to contribute |
-| [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) | Community guidelines |
-| [ROADMAP.md](./ROADMAP.md) | Feature roadmap and milestones |
-| [CHANGELOG.md](./CHANGELOG.md) | Version history |
-## Documentation & Resources
-
 | Document | Contents |
 | --- | --- |
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | System design, data flow, and component architecture |
@@ -358,9 +374,16 @@ A: Absolutely. Clone the repo and follow the [Getting Started](#getting-started)
 
 ---
 
-<p align="center">
-  <strong>Love Null?</strong> <a href="https://github.com/adit-ya15/music-player">Star on GitHub</a> • <a href="https://null-music.netlify.app/#support">Support Development</a>
-</p>
+## ⭐ Support the Project
+
+If you believe in:
+- Free software  
+- No ads  
+- Open source  
+
+👉 Give this repo a ⭐ — it helps more than anything
+
+👉 Share it with friends — help it grow 🚀
 
 <p align="center">
   <sub>Made with ❤️ for music lovers. Open-source. Ad-free. Forever.</sub>
