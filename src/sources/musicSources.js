@@ -1,6 +1,7 @@
 import { resolveYtdlpEndpointStream } from './ytdlpSource.js';
 import { resolvePipedStream } from './pipedSource.js';
-import { saavnApi } from '../api/saavn';
+import { saavnApi } from '../api/saavn.js';
+import { pickBestTrackMatch } from '../../shared/trackMatch.js';
 
 const STREAM_CACHE_TTL_MS = 10 * 60 * 1000;
 
@@ -9,44 +10,12 @@ function normalizeVideoId(track) {
   return String(raw).replace(/^yt-/, '').trim();
 }
 
-function normalizeText(value = '') {
-  return String(value || '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
 function isPreviewLength(track, streamUrl = '') {
   const duration = Number(track?.duration || 0);
   if (duration > 0 && duration <= 35) return true;
 
   const url = String(streamUrl || '').toLowerCase();
   return url.includes('preview') || url.includes('sample') || url.includes('30sec');
-}
-
-function scoreSaavnCandidate(track, candidate) {
-  const seedTitle = normalizeText(track?.title || '');
-  const seedArtist = normalizeText(track?.artist || '');
-  const candidateTitle = normalizeText(candidate?.title || '');
-  const candidateArtist = normalizeText(candidate?.artist || '');
-
-  let score = 0;
-
-  if (seedTitle && candidateTitle) {
-    if (candidateTitle === seedTitle) score += 4;
-    else if (candidateTitle.includes(seedTitle) || seedTitle.includes(candidateTitle)) score += 3;
-  }
-
-  if (seedArtist && candidateArtist) {
-    if (candidateArtist === seedArtist) score += 3;
-    else if (candidateArtist.includes(seedArtist) || seedArtist.includes(candidateArtist)) score += 2;
-  }
-
-  if (Number(candidate?.duration || 0) > 35) score += 1;
-  if (candidate?.coverArt) score += 0.25;
-
-  return score;
 }
 
 async function resolveSaavnFallbackTrack(track) {
@@ -60,11 +29,14 @@ async function resolveSaavnFallbackTrack(track) {
 
   const candidates = result.data
     .map((song) => saavnApi.formatTrack(song))
-    .filter((song) => song?.streamUrl)
-    .map((candidate) => ({ candidate, score: scoreSaavnCandidate(track, candidate) }))
-    .sort((left, right) => right.score - left.score);
+    .filter((song) => song?.streamUrl && Number(song?.duration || 0) > 35);
 
-  return candidates[0]?.candidate || null;
+  const confident = pickBestTrackMatch(candidates, track, {
+    getTitle: (item) => item?.title,
+    getArtist: (item) => item?.artist,
+  });
+
+  return confident?.candidate || null;
 }
 
 export function createMusicSources({
@@ -119,20 +91,27 @@ export function createMusicSources({
       new Promise((resolve) => setTimeout(() => resolve(null), timeoutMs)),
     ]);
 
+    const mustPreferSaavn =
+      !race?.streamUrl ||
+      isPreviewLength(track, race?.streamUrl) ||
+      race?.resolutionMode === 'search-fallback';
+
+    if (mustPreferSaavn) {
+      const saavnResolved = await resolveSaavnFallbackTrack(track);
+      if (saavnResolved?.streamUrl) {
+        const nextResolved = {
+          ...saavnResolved,
+          streamSource: saavnResolved.streamSource || 'saavn',
+        };
+        setCachedStream(videoId, nextResolved);
+        return nextResolved;
+      }
+    }
+
     if (race?.streamUrl && !isPreviewLength(track, race.streamUrl)) {
       const nextResolved = {
         ...race,
         streamSource: race.streamSource || 'monochrome',
-      };
-      setCachedStream(videoId, nextResolved);
-      return nextResolved;
-    }
-
-    const saavnResolved = await resolveSaavnFallbackTrack(track);
-    if (saavnResolved?.streamUrl) {
-      const nextResolved = {
-        ...saavnResolved,
-        streamSource: saavnResolved.streamSource || 'saavn',
       };
       setCachedStream(videoId, nextResolved);
       return nextResolved;

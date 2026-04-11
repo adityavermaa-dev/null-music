@@ -36,6 +36,35 @@ function normalizeBaseUrl(value) {
   return String(value || '').replace(/\/+$/, '');
 }
 
+function normalizeComparableText(value = '') {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function scoreManifestCandidate(item, context = {}) {
+  const seedTitle = normalizeComparableText(context?.title || '');
+  const seedArtist = normalizeComparableText(context?.artist || '');
+  const candidateTitle = normalizeComparableText(item?.title || item?.name || '');
+  const candidateArtist = normalizeComparableText(item?.artist || item?.artistName || item?.artists || '');
+
+  let score = 0;
+  if (seedTitle && candidateTitle) {
+    if (candidateTitle === seedTitle) score += 5;
+    else if (candidateTitle.includes(seedTitle) || seedTitle.includes(candidateTitle)) score += 3;
+  }
+
+  if (seedArtist && candidateArtist) {
+    if (candidateArtist === seedArtist) score += 4;
+    else if (candidateArtist.includes(seedArtist) || seedArtist.includes(candidateArtist)) score += 2;
+  }
+
+  if (Number(item?.allowStreaming) !== 0 && item?.allowStreaming !== false) score += 0.5;
+  return score;
+}
+
 function looksLikeManifestUrl(value = '') {
   const url = String(value || '').toLowerCase();
   return url.includes('.mpd') || url.includes('.m3u8') || url.includes('/manifests/');
@@ -185,7 +214,14 @@ async function resolveFromHifiApiBase(baseUrl, context, timeoutMs) {
   if (!searchResp.ok) return '';
   const searchPayload = await searchResp.json();
   const items = Array.isArray(searchPayload?.data?.items) ? searchPayload.data.items : [];
-  const chosen = items.find((item) => Number(item?.id) > 0 && item?.allowStreaming !== false) || items[0];
+  const rankedItems = items
+    .filter((item) => Number(item?.id) > 0)
+    .map((item) => ({
+      item,
+      score: scoreManifestCandidate(item, context),
+    }))
+    .sort((left, right) => right.score - left.score);
+  const chosen = rankedItems[0]?.item || items[0];
   const trackId = chosen?.id;
   if (!trackId) return '';
 
@@ -206,7 +242,12 @@ async function resolveFromHifiApiBase(baseUrl, context, timeoutMs) {
   if (!uri) return '';
 
   const verified = await verifyStreamUrl(uri, timeoutMs);
-  return verified ? uri : '';
+  return verified
+    ? {
+      streamUrl: uri,
+      resolutionMode: 'search-fallback',
+    }
+    : null;
 }
 
 function buildCandidates(videoId, endpointsCsv) {
@@ -247,6 +288,7 @@ function buildCandidates(videoId, endpointsCsv) {
 async function probeEndpoint(endpointUrl, videoId, timeoutMs, context = {}) {
   const startedAt = nowMs();
   let streamUrl;
+  let resolutionMode = 'id-endpoint';
 
   try {
     streamUrl = await resolveFromEndpoint(endpointUrl, timeoutMs);
@@ -256,14 +298,6 @@ async function probeEndpoint(endpointUrl, videoId, timeoutMs, context = {}) {
       for (const host of apiHosts) {
         const base = normalizeBaseUrl(host);
         if (!base) continue;
-
-        try {
-          streamUrl = await resolveFromHifiApiBase(base, context, timeoutMs);
-        } catch {
-          streamUrl = '';
-        }
-
-        if (streamUrl) break;
 
         const variants = [
           `${base}/stream/${encodeURIComponent(videoId)}`,
@@ -280,6 +314,18 @@ async function probeEndpoint(endpointUrl, videoId, timeoutMs, context = {}) {
           }
         }
 
+        if (!streamUrl) {
+          try {
+            const fallbackResult = await resolveFromHifiApiBase(base, context, timeoutMs);
+            streamUrl = fallbackResult?.streamUrl || '';
+            if (streamUrl) {
+              resolutionMode = fallbackResult?.resolutionMode || 'search-fallback';
+            }
+          } catch {
+            streamUrl = '';
+          }
+        }
+
         if (streamUrl) break;
       }
 
@@ -290,7 +336,29 @@ async function probeEndpoint(endpointUrl, videoId, timeoutMs, context = {}) {
       const endpointLooksLikeBase = /^https?:\/\//i.test(endpointUrl) && !endpointUrl.includes('/stream/') && !endpointUrl.includes('/resolve/') && !endpointUrl.includes('{videoId}');
       if (!endpointLooksLikeBase) throw error;
 
-      streamUrl = await resolveFromHifiApiBase(endpointUrl, context, timeoutMs);
+      const base = normalizeBaseUrl(endpointUrl);
+      const variants = [
+        `${base}/stream/${encodeURIComponent(videoId)}`,
+        `${base}/api/stream/${encodeURIComponent(videoId)}`,
+        `${base}/resolve/${encodeURIComponent(videoId)}`,
+      ];
+
+      for (const variant of variants) {
+        try {
+          streamUrl = await resolveFromEndpoint(variant, timeoutMs);
+          if (streamUrl) break;
+        } catch {
+          // continue to search-based resolution
+        }
+      }
+
+      if (!streamUrl) {
+        const fallbackResult = await resolveFromHifiApiBase(endpointUrl, context, timeoutMs);
+        streamUrl = fallbackResult?.streamUrl || '';
+        if (streamUrl) {
+          resolutionMode = fallbackResult?.resolutionMode || 'search-fallback';
+        }
+      }
       if (!streamUrl) {
         throw error;
       }
@@ -311,6 +379,7 @@ async function probeEndpoint(endpointUrl, videoId, timeoutMs, context = {}) {
     endpointUrl,
     streamUrl,
     elapsedMs: elapsed,
+    resolutionMode,
   };
 }
 
@@ -345,6 +414,7 @@ export async function resolveMonochromeStream(videoId, options = {}) {
       streamSource: 'monochrome',
       endpoint: best.endpointUrl,
       measuredLatencyMs: best.elapsedMs,
+      resolutionMode: best.resolutionMode || 'id-endpoint',
       verified: true,
     };
   } catch {

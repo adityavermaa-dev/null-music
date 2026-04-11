@@ -1,7 +1,7 @@
 import axios from 'axios';
-import { friendlyErrorMessage, logError } from '../utils/logger';
+import { friendlyErrorMessage, logError } from '../utils/logger.js';
 
-import { API_BASE } from './apiBase';
+import { API_BASE } from './apiBase.js';
 
 const SAAVN_API_BASE = `${API_BASE}/saavn`;
 const HOME_FEED_QUERIES = [
