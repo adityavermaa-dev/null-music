@@ -55,9 +55,6 @@ Stream unlimited music without paying. Ever.
 🔒 **Your Privacy Matters**  
 Open-source code. Zero tracking. No data harvesting.
 
-📱 **Works Offline**  
-Download tracks and listen anywhere, even without internet.
-
 🚀 **Fast & Reliable**  
 Intelligent fallback routing ensures playback never stops.
 
